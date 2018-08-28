@@ -71,5 +71,15 @@ namespace flame {
 
     }
 
+    const Image3b& MeshEstimator::getDebugImageWireframe() {
+        return sensor_->getDebugImageWireframe();
+    }
+
+    const Image3b& MeshEstimator::getDebugImageInverseDepthMap() {
+        return sensor_->getDebugImageInverseDepthMap();;
+    }
+
+
+
 
 }

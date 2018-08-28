@@ -24,6 +24,10 @@ namespace flame {
 
 
         std::shared_ptr<flame::Flame> sensor_;
+
+        const Image3b& getDebugImageWireframe();
+
+        const Image3b& getDebugImageInverseDepthMap();
     private:
 
         // Depth sensor.

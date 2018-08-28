@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <ros/ros.h>
 #include <cv_bridge/cv_bridge.h>
+#include <sensor_msgs/image_encodings.h>
 #include <opencv2/opencv.hpp>
 
 #include <boost/filesystem.hpp>
@@ -88,7 +89,7 @@ std::condition_variable con;
 double current_time = -1;
 queue<okvis::ImuMeasurement> imu_buf;
 
-ros::Publisher pub_img,pub_match;
+ros::Publisher pub_img,pub_match, pub_depth;
 
 int sum_of_wait = 0;
 
@@ -427,11 +428,23 @@ void track_featrues() {
 
             std::cout<< "Timing: " << timing.toc() << " " << inlier_matches_kp1_k[0].size() << std::endl;
 
-            inliner_mutex.lock();
-            feature_tracking_avalible = true;
-            inliner_view0_ft = voFeatureTrackingPipeline->inliner_view0;
-            inliner_view1_ft = voFeatureTrackingPipeline->inliner_view1;
-            inliner_mutex.unlock();
+//            inliner_mutex.lock();
+//            feature_tracking_avalible = true;
+//            inliner_view0_ft = voFeatureTrackingPipeline->inliner_view0;
+//            inliner_view1_ft = voFeatureTrackingPipeline->inliner_view1;
+//            inliner_mutex.unlock();
+
+            cv_bridge::CvImage out_msg;
+            std_msgs::Header header;
+            header.stamp = ros::Time::now();
+            header.frame_id = "world";
+            out_msg.header   = header; // Same timestamp and tf frame as input image
+            out_msg.encoding = sensor_msgs::image_encodings::RGB8; // Or whatever
+            out_msg.image    = voFeatureTrackingPipeline->inliner_view0; // Your cv::Mat
+
+
+            pub_match.publish(out_msg.toImageMsg());
+
 
 
 
@@ -589,6 +602,20 @@ void estimate_depth_mesh() {
 //                                        T_WC0, updateMeshInfo.stereoCameraData.image0,
 //                                        T_WC1, updateMeshInfo.stereoCameraData.image1,
 //                                        isKeyframe);
+//
+//        const flame::Image3b depth_image =  mesh_estimator->getDebugImageWireframe();
+//
+//
+//        cv_bridge::CvImage out_msg;
+//        std_msgs::Header header;
+//        header.stamp = ros::Time::now();
+//        header.frame_id = "world";
+//        out_msg.header   = header; // Same timestamp and tf frame as input image
+//        out_msg.encoding = sensor_msgs::image_encodings::RGB8; // Or whatever
+//        out_msg.image    = depth_image; // Your cv::Mat
+//
+//
+//        pub_depth.publish(out_msg.toImageMsg());
 
 
     }
@@ -612,6 +639,7 @@ int main(int argc, char **argv)
     registerPub(n);
     pub_img = n.advertise<sensor_msgs::PointCloud>("feature", 1000);
     pub_match = n.advertise<sensor_msgs::Image>("feature_img",1000);
+    pub_depth = n.advertise<sensor_msgs::Image>("depth_img",1000);
 
 
     std::string config_file
@@ -648,11 +676,6 @@ int main(int argc, char **argv)
                                              K1.cast<float>(), K1.inverse().cast<float>(),
                                              distort1.cast<float>(),
                                              mesh_est_param);
-
-
-
-
-
 
 
     std::thread imu_images_synchronize{synchronize};
@@ -844,18 +867,18 @@ int main(int argc, char **argv)
         ++counter;
 
 
-            inliner_mutex.lock();
-            bool availible = feature_tracking_avalible;
-
-            cv::Mat inliner_view0 = inliner_view0_ft;
-            cv::Mat inliner_view1 = inliner_view1_ft;
-            inliner_mutex.unlock();
-
-        if (availible) {
-            cv::imshow("inliner 0", inliner_view0);
-            //cv::imshow("inliner 1", inliner_view1);
-            cv::waitKey(1);
-        }
+//        inliner_mutex.lock();
+//        bool availible = feature_tracking_avalible;
+//
+//        cv::Mat inliner_view0 = inliner_view0_ft;
+//        cv::Mat inliner_view1 = inliner_view1_ft;
+//        inliner_mutex.unlock();
+//
+//        if (availible) {
+//            cv::imshow("inliner 0", inliner_view0);
+//            //cv::imshow("inliner 1", inliner_view1);
+//            cv::waitKey(1);
+//        }
 
 
         // display progress
