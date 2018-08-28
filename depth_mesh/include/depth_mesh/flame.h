@@ -35,6 +35,7 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/features2d/features2d.hpp>
 
+
 #include "depth_mesh/types.h"
 #include "depth_mesh/params.h"
 
@@ -142,7 +143,7 @@ class Flame final {
    * @param[in] idepths_true True inverse depths (for debugging).
    * @return True if update successful. Outputs are only valid if returns True.
    */
-  bool update(double time, uint32_t img_id,
+  bool update(okvis::Time time, uint32_t img_id,
               const okvis::kinematics::Transformation & T_new0,
               const Image1b& img_new0,
               const okvis::kinematics::Transformation & T_new1,

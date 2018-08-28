@@ -31,7 +31,7 @@ namespace flame {
 
     }
 
-    void MeshEstimator::processFrame( const double time, int32_t img_id,
+    void MeshEstimator::processFrame( const okvis::Time time, int64_t img_id,
                       const okvis::kinematics::Transformation& T_WC0,
                                       const cv::Mat& img_gray0,
                                       const okvis::kinematics::Transformation& T_WC1,
@@ -41,12 +41,8 @@ namespace flame {
         cv::Mat img_gray_undist0;
         cv::undistort(img_gray0, img_gray_undist0, K0cv_, D0cv_);
 
-
-
         cv::Mat img_gray_undist1;
         cv::undistort(img_gray1, img_gray_undist1, K1cv_, D1cv_);
-
-
 
         bool is_poseframe = isKeyframe;
 

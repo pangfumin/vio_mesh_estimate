@@ -53,7 +53,6 @@ void Estimator::clearState()
     initial_timestamp = 0;
     all_image_frame.clear();
     relocalize = false;
-    retrive_data_vector.clear();
     relocalize_t = Eigen::Vector3d(0, 0, 0);
     relocalize_r = Eigen::Matrix3d::Identity();
 
@@ -203,6 +202,21 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
         last_R0 = Rs[0];
         last_P0 = Ps[0];
     }
+}
+
+std::vector<State> Estimator::getCurrentStates() {
+    std::vector<State> states(WINDOW_SIZE + 1);
+    for (int i = 0; i < WINDOW_SIZE + 1; i ++) {
+        State state;
+        state.P = Ps[i];
+        state.V = Vs[i];
+        state.R = Rs[i];
+        state.Ba = Bas[i];
+        state.Bg = Bgs[i];
+        state.Header = Headers[i];
+    }
+
+    return states;
 }
 bool Estimator::initialStructure()
 {

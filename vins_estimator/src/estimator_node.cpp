@@ -31,11 +31,15 @@
 
 struct StereoFeatures {
     okvis::Time timeStamp;
+    okvis::StereoCameraData stereoCameraData;
     std::map<int, vector<pair<int, Vector3d>>> features;
 };
 
-struct UpdateMeshInfo {
 
+struct UpdateMeshInfo {
+    std::vector<State> vio_state;
+    bool isKeyframe;
+    okvis::StereoCameraData stereoCameraData;
 };
 
 okvis::ImuFrameSynchronizer imuFrameSynchronizer;
@@ -69,8 +73,9 @@ cv::Mat inliner_view1_ft;
 
 
 ///< Mesh estimate
-Eigen::Matrix3f K0, K1;
-Eigen::Vector4f distort0, distort1;
+Eigen::Matrix3d K0, K1;
+Eigen::Vector4d distort0, distort1;
+int imageWidth, imageHeight;
 
 flame::Params mesh_est_param;
 std::shared_ptr<flame::MeshEstimator> mesh_estimator;
@@ -196,8 +201,8 @@ std::shared_ptr<aslam::NCamera> loadCameraInfoFromConfigFile(
         return camera_system;
     }
 
-    int imageWidth = static_cast<int>(fs["image_width"]);
-    int imageHeight = static_cast<int>(fs["image_height"]);
+    imageWidth = static_cast<int>(fs["image_width"]);
+    imageHeight = static_cast<int>(fs["image_height"]);
 
 
     // For camera 0
@@ -457,6 +462,8 @@ void track_featrues() {
             StereoFeatures stereoFeatures;
             stereoFeatures.timeStamp = imuImagesPackage.second.timeStamp;
             stereoFeatures.features = image;
+            stereoFeatures.stereoCameraData = imuImagesPackage.second.measurement;
+
             std::pair<okvis::ImuMeasurementDeque, StereoFeatures>
                     imuFeaturesPackage = std::make_pair(imuImagesPackage.first, stereoFeatures);
 
@@ -499,8 +506,6 @@ void vio_estimate() {
 
         std::cout<< "processImage: " << whole_t << std::endl;
 
-
-
         printStatistics(estimator, whole_t);
         header.frame_id = "world";
         cur_header = header;
@@ -524,18 +529,68 @@ void vio_estimate() {
             update();
         m_state.unlock();
         m_buf.unlock();
+
+
+        // Add result into buffer
+
+        if (estimator.isInitalized()) {
+            bool isKeyframe = estimator.isKeyframe();
+            std::vector<State> states = estimator.getCurrentStates();
+            UpdateMeshInfo updateMeshInfo;
+            updateMeshInfo.isKeyframe = isKeyframe;
+            updateMeshInfo.vio_state = states;
+            updateMeshInfo.stereoCameraData = imuFeaturesPackage.second.stereoCameraData;
+
+
+            meshUpdateInfoThreadSafeQueue.PushNonBlockingDroppingIfFull(updateMeshInfo, 10);
+        }
+
     }
 
 }
 
 void estimate_depth_mesh() {
+    uint64_t id = 0;
     for (;;) {
         UpdateMeshInfo updateMeshInfo;
         if (meshUpdateInfoThreadSafeQueue.PopBlocking(&updateMeshInfo) == false)
             return;
 
         // todo
-        std::cout<< "get meshUpdate info" << std::endl;
+        std::cout<< "get meshUpdate info "  << updateMeshInfo.vio_state.size()
+        << " " << updateMeshInfo.isKeyframe <<  std::endl;
+
+        Eigen::Isometry3d eigen_T_WS = Eigen::Isometry3d::Identity();
+        eigen_T_WS.linear() = updateMeshInfo.vio_state.back().R;
+        eigen_T_WS.translation() = updateMeshInfo.vio_state.back().P;
+        okvis::kinematics::Transformation T_WS(eigen_T_WS.matrix());
+
+        aslam::Transformation aslam_T_B_C0= camera_system->get_T_C_B(0).inverse();
+        Eigen::Isometry3d T_BC0 = Eigen::Isometry3d::Identity();
+        T_BC0.translation() = aslam_T_B_C0.getPosition();
+        T_BC0.linear() = aslam_T_B_C0.getRotation().toImplementation().toRotationMatrix();
+        okvis::kinematics::Transformation T_WC0 = T_WS * okvis::kinematics::Transformation(T_BC0.matrix());
+
+//        std::cout<<"T_BC0: " << std::endl << T_BC0.matrix();
+
+        aslam::Transformation aslam_T_B_C1= camera_system->get_T_C_B(1).inverse();
+        Eigen::Isometry3d T_BC1 = Eigen::Isometry3d::Identity();
+        T_BC1.translation() = aslam_T_B_C1.getPosition();
+        T_BC1.linear() = aslam_T_B_C1.getRotation().toImplementation().toRotationMatrix();
+        okvis::kinematics::Transformation T_WC1 = T_WS * okvis::kinematics::Transformation(T_BC1.matrix());
+
+//        std::cout<<"T_BC1: " << std::endl << T_BC1.matrix();
+
+
+        okvis::Time time(updateMeshInfo.vio_state.back().Header.stamp.toSec());
+        bool isKeyframe = updateMeshInfo.isKeyframe;
+
+//        mesh_estimator->processFrame(time, id++,
+//                                        T_WC0, updateMeshInfo.stereoCameraData.image0,
+//                                        T_WC1, updateMeshInfo.stereoCameraData.image1,
+//                                        isKeyframe);
+
+
     }
 }
 
@@ -560,7 +615,7 @@ int main(int argc, char **argv)
 
 
     std::string config_file
-        = "/home/pang/maplab_ws/src/vio_mesh_estimate/vins_mono/config/euroc/euroc_config.yaml";
+        = "/home/pang/maplab_ws/src/vio_mesh_estimate/config/euroc/euroc_config.yaml";
 
     camera_system = loadCameraInfoFromConfigFile(config_file);
     voFeatureTrackingPipeline
@@ -584,8 +639,15 @@ int main(int argc, char **argv)
             kNFrameToleranceNs));
 
 
-    const Eigen::VectorXd cam0_intrinsic = camera_system->getCamera(0).getParameters();
-    const Eigen::VectorXd cam1_intrinsic = camera_system->getCamera(1).getParameters();
+//    const Eigen::VectorXd cam0_intrinsic = camera_system->getCamera(0).getParameters();
+//    const Eigen::VectorXd cam1_intrinsic = camera_system->getCamera(1).getParameters();
+
+    mesh_estimator = std::make_shared<flame::MeshEstimator>(imageWidth, imageHeight,
+                                             K0.cast<float>(), K0.inverse().cast<float>(),
+                                             distort0.cast<float>(),
+                                             K1.cast<float>(), K1.inverse().cast<float>(),
+                                             distort1.cast<float>(),
+                                             mesh_est_param);
 
 
 

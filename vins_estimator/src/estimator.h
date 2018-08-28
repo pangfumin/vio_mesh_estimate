@@ -21,22 +21,14 @@
 #include <queue>
 #include <opencv2/core/eigen.hpp>
 
-struct RetriveData
-{
-    /* data */
-    int old_index;
-    int cur_index;
-    double header;
-    Vector3d P_old;
-    Matrix3d R_old;
-    vector<cv::Point2f> measurements;
-    vector<int> features_ids; 
-    bool relocalized;
-    bool relative_pose;
-    Vector3d relative_t;
-    Quaterniond relative_q;
-    double relative_yaw;
-    double loop_pose[7];
+struct State {
+    Vector3d P;
+    Vector3d V;
+    Matrix3d R;
+    Vector3d Ba;
+    Vector3d Bg;
+    std_msgs::Header Header;
+
 };
 
 class Estimator
@@ -49,6 +41,11 @@ class Estimator
     // interface
     void processIMU(double t, const Vector3d &linear_acceleration, const Vector3d &angular_velocity);
     void processImage(const map<int, vector<pair<int, Vector3d>>> &image, const std_msgs::Header &header);
+
+    bool isInitalized() {return  solver_flag == NON_LINEAR;}
+    bool isKeyframe() {return marginalization_flag == MARGIN_OLD;}
+
+    std::vector<State> getCurrentStates();
 
     // internal
     void clearState();
@@ -126,8 +123,7 @@ class Estimator
     double para_Ex_Pose[NUM_OF_CAM][SIZE_POSE];
     double para_Retrive_Pose[SIZE_POSE];
 
-    RetriveData retrive_pose_data, front_pose;
-    vector<RetriveData> retrive_data_vector;
+
     int loop_window_index;
     bool relocalize;
     Vector3d relocalize_t;
