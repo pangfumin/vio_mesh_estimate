@@ -189,7 +189,7 @@ namespace flame {
 
     void DepthEstimate::processFrame(const uint32_t img_id, const double time,
                                      const okvis::kinematics::Transformation &pose, const cv::Mat3b &rgb,
-                                     const cv::Mat1f &depth) {
+                                     const cv::Mat1f &depth, bool asKeyframe) {
         stats_.tick("process_frame");
 
         /*==================== Process image ====================*/

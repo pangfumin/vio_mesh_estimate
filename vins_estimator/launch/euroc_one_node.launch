@@ -3,9 +3,18 @@
 	  <arg name="vins_path" default = "$(find vins_estimator)/config/../" />
     <node name="rvizvisualisation" pkg="rviz" type="rviz" output="log" args="-d $(find vins_estimator)/../config/vins_rviz_config.rviz" />
 
+   <arg name="load_params" default="true" />
+   <arg name="param_file" default="flame_offline_asl.yaml" />
+
+
+   <!-- frames -->
+   <include file="$(find vins_estimator)/launch/frames.launch" />
+
     <node name="vins_estimator" pkg="vins_estimator" type="vins_estimator" output="screen">
        <param name="config_file" type="string" value="$(arg config_path)" />
        <param name="vins_folder" type="string" value="$(arg vins_path)" />
+        <rosparam command="load" if="$(arg load_params)"
+                     file="$(find vins_estimator)/config/$(arg param_file)"/>
     </node>
 
 </launch>

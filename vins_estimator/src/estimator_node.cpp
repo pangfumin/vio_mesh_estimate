@@ -25,7 +25,7 @@
 #include <depth_mesh/mesh_estimator.hpp>
 #include <depth_mesh/params.h>
 
-
+#include "depth_estimate.hpp"
 
 #include "estimator.h"
 #include "parameters.h"
@@ -81,7 +81,7 @@ Eigen::Vector4d distort0, distort1;
 int imageWidth, imageHeight;
 
 flame::Params mesh_est_param;
-//std::shared_ptr<flame::MeshEstimator> mesh_estimator;
+std::shared_ptr<flame::DepthEstimate> mesh_estimator;
 okvis::threadsafe::ThreadSafeQueue<UpdateMeshInfo> meshUpdateInfoThreadSafeQueue;
 
 
@@ -644,6 +644,9 @@ int main(int argc, char **argv)
     pub_depth = n.advertise<sensor_msgs::Image>("depth_img",1000);
 
 
+
+
+
     std::string config_file
         = "/home/pang/maplab_ws/src/vio_mesh_estimate/config/euroc/euroc_config.yaml";
 
@@ -651,6 +654,7 @@ int main(int argc, char **argv)
     voFeatureTrackingPipeline
         = std::make_shared<feature_tracking::VOFeatureTrackingPipeline>(camera_system);
 
+    mesh_estimator = std::make_shared<flame::DepthEstimate>(n, K0, imageWidth, imageHeight);
 
     // Initialize the pipeline.
     static constexpr bool kCopyImages = false;
@@ -668,18 +672,7 @@ int main(int argc, char **argv)
             kNumThreads, mono_pipelines, camera_system, camera_system,
             kNFrameToleranceNs));
 
-
-//    const Eigen::VectorXd cam0_intrinsic = camera_system->getCamera(0).getParameters();
-//    const Eigen::VectorXd cam1_intrinsic = camera_system->getCamera(1).getParameters();
-
-//    mesh_estimator = std::make_shared<flame::MeshEstimator>(imageWidth, imageHeight,
-//                                             K0.cast<float>(), K0.inverse().cast<float>(),
-//                                             distort0.cast<float>(),
-//                                             K1.cast<float>(), K1.inverse().cast<float>(),
-//                                             distort1.cast<float>(),
-//                                             mesh_est_param);
-
-
+    
     std::thread imu_images_synchronize{synchronize};
     std::thread feature_tracking{track_featrues};
     std::thread estimate{vio_estimate};

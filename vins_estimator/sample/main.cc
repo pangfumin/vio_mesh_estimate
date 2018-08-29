@@ -147,23 +147,18 @@ int main(int argc, char *argv[]) {
     input->get(&img_id, &time, &rgb, &depth, &q, &t);
 
 
-    if (num_imgs % 1 == 0) {
-      // Eat data.
-      Eigen::Isometry3d eigen_pose = Eigen::Isometry3d::Identity();
-      eigen_pose.linear() = q.toRotationMatrix();
-      eigen_pose.translation() = t;
-      okvis::kinematics::Transformation pose(eigen_pose.matrix());
+    bool isKeyframe = num_imgs % 4;
+
+  // Eat data.
+  Eigen::Isometry3d eigen_pose = Eigen::Isometry3d::Identity();
+  eigen_pose.linear() = q.toRotationMatrix();
+  eigen_pose.translation() = t;
+  okvis::kinematics::Transformation pose(eigen_pose.matrix());
 
 
-      node.processFrame(img_id, time, pose,
-                   rgb, depth);
-    }
+  node.processFrame(img_id, time, pose,
+               rgb, depth, isKeyframe);
 
-    /*==================== Timing stuff ====================*/
-    // Compute two measures of throughput in Hz. The first is the actual number of
-    // frames per second, the second is the theoretical maximum fps based on the
-    // runtime. They are not necessarily the same - the former takes external
-    // latencies into account.
 
     // Compute maximum fps based on runtime.
     double fps_max = 0.0f;
