@@ -91,11 +91,10 @@ class FlameOffline final {
   /**
    * @brief Constructor.
    */
-  FlameOffline() :
+  FlameOffline(ros::NodeHandle& pnh) :
       stats_(),
       load_(getpid()),
-      nh_("flame"),
-      pnh_("~"),
+      pnh_(pnh),
       num_imgs_(0),
       camera_world_frame_id_(),
       camera_frame_id_(),
@@ -108,7 +107,7 @@ class FlameOffline final {
       prev_pose_(),
       params_(),
       sensor_(nullptr),
-      it_(nh_),
+      it_(pnh_),
       depth_pub_() {
     /*==================== Data Params ====================*/
     std::string pose_path;
@@ -248,7 +247,7 @@ class FlameOffline final {
     // Setup input stream.
     FLAME_ASSERT(resize_factor_ == 1);
     input_ = std::make_shared<ros_sensor_streams::
-        ASLRGBDOfflineStream>(nh_,
+        ASLRGBDOfflineStream>(pnh_,
                               pose_path,
                               rgb_path,
                               depth_path,
@@ -268,10 +267,10 @@ class FlameOffline final {
       features_pub_ = it_.advertiseCamera("depth_registered_raw/image_rect", 5);
     }
     if (publish_mesh_) {
-      mesh_pub_ = nh_.advertise<pcl_msgs::PolygonMesh>("mesh", 5);
+      mesh_pub_ = pnh_.advertise<pcl_msgs::PolygonMesh>("mesh", 5);
     }
     if (publish_cloud_) {
-      cloud_pub_ = nh_.advertise<sensor_msgs::PointCloud2>("cloud", 5);
+      cloud_pub_ = pnh_.advertise<sensor_msgs::PointCloud2>("cloud", 5);
     }
 
 
@@ -642,8 +641,7 @@ class FlameOffline final {
   fu::StatsTracker stats_;
   fu::LoadTracker load_;
 
-  ros::NodeHandle nh_;
-  ros::NodeHandle pnh_;
+    ros::NodeHandle pnh_;
 
   // Number of images processed.
   int num_imgs_;
@@ -720,7 +718,10 @@ int main(int argc, char *argv[]) {
   std::signal(SIGINT, crash_handler);
   std::signal(SIGSEGV, crash_handler);
 
-  flame_ros::FlameOffline node;
+//  ros::NodeHandle nh("flame");
+   ros::NodeHandle pnh("~");
+
+  flame_ros::FlameOffline node(pnh);
   node.main();
 
   return 0;

@@ -23,4 +23,10 @@
   <depend>common</depend>
   <depend>feature_tracker</depend>
   <depend>depth_mesh</depend>
+  <depend>pcl_conversions</depend>
+  <depend>pcl_ros</depend>
+  <depend>sensor_msgs</depend>
+  <depend>image_transport</depend>
+  <depend>dynamic_reconfigure</depend>
+  <depend>image_geometry</depend>
 </package>

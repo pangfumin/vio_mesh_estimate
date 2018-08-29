@@ -21,6 +21,7 @@ endif()
 
 cs_add_executable(vins_estimator
     src/estimator_node.cpp
+        src/depth_estimate.cpp
     src/parameters.cpp
     src/estimator.cpp
     src/feature_manager.cpp
