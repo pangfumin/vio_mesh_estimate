@@ -20,6 +20,9 @@
  * @date 2016-12-13 15:28:02 (Tue)
  */
 
+
+#ifndef  _ROS_UTILS_H_
+#define  _ROS_UTILS_H_
 #include <string>
 #include <vector>
 #include <unordered_map>
@@ -118,3 +121,5 @@ POINT_CLOUD_REGISTER_POINT_STRUCT(flame::PointNormalUV,
                                   (float, normal_z, normal_z)
                                   (float, u, u)
                                   (float, v, v))
+
+#endif

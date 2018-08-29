@@ -40,7 +40,7 @@ cs_add_library(depth_mesh  ${FLAME_SRCS})
 
 
 include_directories(sample)
-add_executable(flame_offline_asl
+cs_add_executable(flame_offline_asl
         sample/flame_offline_asl.cc
         sample/utils.h
         sample/utils.cc

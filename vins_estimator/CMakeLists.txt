@@ -19,8 +19,7 @@ if(OPENMP_FOUND)
 endif()
 
 
-cs_add_executable(vins_estimator
-    src/estimator_node.cpp
+cs_add_library(vins_estimator_lib
         src/depth_estimate.cpp
         src/ros_utils.cc
     src/parameters.cpp
@@ -37,6 +36,23 @@ cs_add_executable(vins_estimator
     src/initial/initial_sfm.cpp
     src/initial/initial_ex_rotation.cpp
     )
+
+add_executable(vins_estimator src/estimator_node.cpp)
+target_link_libraries(vins_estimator
+        vins_estimator_lib)
+
+include_directories(sample)
+add_executable(flame_offline_asl
+        sample/main.cc
+        sample/ros_sensor_streams/asl_rgbd_offline_stream.h
+        sample/ros_sensor_streams/asl_rgbd_offline_stream.cc
+        sample/dataset_utils/asl/dataset.h
+        sample/dataset_utils/asl/types.h
+        sample/dataset_utils/utils.h
+        sample/dataset_utils/utils.cc)
+
+target_link_libraries(flame_offline_asl
+        vins_estimator_lib)
 
 
 cs_install()

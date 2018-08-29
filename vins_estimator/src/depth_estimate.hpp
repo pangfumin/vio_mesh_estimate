@@ -44,13 +44,7 @@
 namespace bfs = boost::filesystem;
 namespace fu = flame::utils;
 
-/**
- * @brief Signal handler to debug crashes.
- */
-void crash_handler(int sig) {
-    FLAME_ASSERT(false);
-    return;
-}
+
 
 namespace flame {
 /**
