@@ -91,7 +91,7 @@ class FlameOffline final {
   /**
    * @brief Constructor.
    */
-  FlameOffline(ros::NodeHandle& pnh) :
+  FlameOffline(ros::NodeHandle& pnh, Eigen::Matrix3f K, int width, int height) :
       stats_(),
       load_(getpid()),
       pnh_(pnh),
@@ -100,8 +100,10 @@ class FlameOffline final {
       camera_frame_id_(),
       output_dir_(),
       pass_in_truth_(false),
-      input_(nullptr),
-      Kinv_(),
+      K_(K),
+      width_(width),
+      height_(height),
+      Kinv_(K.inverse()),
       max_angular_rate_(0.0f),
       prev_time_(0),
       prev_pose_(),
@@ -110,31 +112,7 @@ class FlameOffline final {
       it_(pnh_),
       depth_pub_() {
     /*==================== Data Params ====================*/
-    std::string pose_path;
-    getParamOrFail(pnh_, "pose_path", &pose_path);
 
-    std::string rgb_path;
-    getParamOrFail(pnh_, "rgb_path", &rgb_path);
-
-    std::string depth_path;
-    getParamOrFail(pnh_, "depth_path", &depth_path);
-
-    std::string world_frame_str;
-    getParamOrFail(pnh_, "world_frame", &world_frame_str);
-
-    ros_sensor_streams::ASLRGBDOfflineStream::WorldFrame world_frame;
-    if (world_frame_str == "RDF") {
-      world_frame = ros_sensor_streams::ASLRGBDOfflineStream::WorldFrame::RDF;
-    } else if (world_frame_str == "FLU") {
-      world_frame = ros_sensor_streams::ASLRGBDOfflineStream::WorldFrame::FLU;
-    } else if (world_frame_str == "FRD") {
-      world_frame = ros_sensor_streams::ASLRGBDOfflineStream::WorldFrame::FRD;
-    } else if (world_frame_str == "RFU") {
-      world_frame = ros_sensor_streams::ASLRGBDOfflineStream::WorldFrame::RFU;
-    } else {
-      ROS_ERROR("Unknown world frame!\n");
-      return;
-    }
 
     /*==================== Input Params ====================*/
     getParamOrFail(pnh_, "input/camera_frame_id", &camera_frame_id_);
@@ -246,15 +224,18 @@ class FlameOffline final {
 
     // Setup input stream.
     FLAME_ASSERT(resize_factor_ == 1);
-    input_ = std::make_shared<ros_sensor_streams::
-        ASLRGBDOfflineStream>(pnh_,
-                              pose_path,
-                              rgb_path,
-                              depth_path,
-                              "camera",
-                              camera_world_frame_id_,
-                              camera_frame_id_,
-                              world_frame);
+
+
+    Kinv_ = K.inverse();
+
+    // Initialize depth sensor.
+    ROS_INFO_COND(!params_.debug_quiet, "Constructing Flame...\n");
+    sensor_ = std::make_shared<flame::Flame>(width,
+                                             height,
+                                             K,
+                                             Kinv_,
+                                             params_);
+
 
     // Set up publishers.
     if (publish_idepthmap_) {
@@ -305,121 +286,7 @@ class FlameOffline final {
   FlameOffline& operator=(FlameOffline&& rhs) = delete;
 
 
-  /**
-   * @brief Main processing loop.
-   */
-  void main() {
-    Kinv_ = input_->K().inverse();
 
-    // Initialize depth sensor.
-    ROS_INFO_COND(!params_.debug_quiet, "Constructing Flame...\n");
-    sensor_ = std::make_shared<flame::Flame>(input_->width(),
-                                             input_->height(),
-                                             input_->K(),
-                                             Kinv_,
-                                             params_);
-
-    /*==================== Enter main loop ====================*/
-    ros::Rate ros_rate(rate_);
-    ROS_INFO_COND(!params_.debug_quiet, "Done. We are GO for launch!\n");
-    while (ros::ok() && !input_->empty()) {
-      stats_.tick("main");
-
-      // Get input data.
-      stats_.set("queue_size", 0);
-      stats_.tick("waiting");
-      uint32_t img_id;
-      double time;
-      cv::Mat3b rgb;
-      cv::Mat1f depth;
-      Eigen::Quaterniond q;
-      Eigen::Vector3d t;
-      input_->get(&img_id, &time, &rgb, &depth, &q, &t);
-      stats_.tock("waiting");
-      ROS_INFO_COND(!params_.debug_quiet,
-                    "FlameNodelet/waiting = %4.1fms, queue_size = %i\n",
-                    stats_.timings("waiting"),
-                    static_cast<int>(stats_.stats("queue_size")));
-
-      if (num_imgs_ % subsample_factor_ == 0) {
-        // Eat data.
-        Eigen::Isometry3d eigen_pose = Eigen::Isometry3d::Identity();
-        eigen_pose.linear() = q.toRotationMatrix();
-        eigen_pose.translation() = t;
-          okvis::kinematics::Transformation pose(eigen_pose.matrix());
-
-
-          processFrame(img_id, time, pose,
-                     rgb, depth);
-      }
-
-      /*==================== Timing stuff ====================*/
-      // Compute two measures of throughput in Hz. The first is the actual number of
-      // frames per second, the second is the theoretical maximum fps based on the
-      // runtime. They are not necessarily the same - the former takes external
-      // latencies into account.
-
-      // Compute maximum fps based on runtime.
-      double fps_max = 0.0f;
-      if (stats_.stats("fps_max") <= 0.0f) {
-        fps_max = 1000.0f / stats_.timings("main");
-      } else {
-        fps_max = 1.0f / (0.99 * 1.0f/stats_.stats("fps_max") +
-                          0.01 * stats_.timings("main")/1000.0f);
-      }
-      stats_.set("fps_max", fps_max);
-
-      // Compute actual fps (overall throughput of system).
-      stats_.tock("fps");
-      double fps = 0.0;
-      if (stats_.stats("fps") <= 0.0f) {
-        fps = 1000.0f / stats_.timings("fps");
-      } else {
-        fps = 1.0f / (0.99 * 1.0f/stats_.stats("fps") +
-                      0.01 * stats_.timings("fps")/1000.0f);
-      }
-      stats_.set("fps", fps);
-      stats_.tick("fps");
-
-      ros::spinOnce();
-      ros_rate.sleep();
-
-      stats_.tock("main");
-
-      if ((num_imgs_ % load_integration_factor_) == 0) {
-        // Compute load stats.
-        fu::Load max_load, sys_load, pid_load;
-        load_.get(&max_load, &sys_load, &pid_load);
-        stats_.set("max_load_cpu", max_load.cpu);
-        stats_.set("max_load_mem", max_load.mem);
-        stats_.set("max_load_swap", max_load.swap);
-        stats_.set("sys_load_cpu", sys_load.cpu);
-        stats_.set("sys_load_mem", sys_load.mem);
-        stats_.set("sys_load_swap", sys_load.swap);
-        stats_.set("pid_load_cpu", pid_load.cpu);
-        stats_.set("pid_load_mem", pid_load.mem);
-        stats_.set("pid_load_swap", pid_load.swap);
-        stats_.set("pid", getpid());
-      }
-
-
-
-      ROS_INFO_COND(!params_.debug_quiet,
-                    "FlameOffline/main(%i/%u) = %4.1fms/%.1fHz (%.1fHz)\n",
-                    num_imgs_, img_id, stats_.timings("main"),
-                    stats_.stats("fps_max"), stats_.stats("fps"));
-
-      num_imgs_++;
-    }
-
-    if (input_->empty()) {
-      ROS_INFO("Finished processing.\n");
-    } else {
-      ROS_ERROR("Unknown error occurred!\n");
-    }
-
-    return;
-  }
 
   void processFrame(const uint32_t img_id, const double time,
                     const okvis::kinematics::Transformation& pose, const cv::Mat3b& rgb,
@@ -502,7 +369,7 @@ class FlameOffline final {
       sensor_->getFilteredInverseDepthMap(&idepthmap);
 
       if (publish_idepthmap_) {
-        publishDepthMap(idepth_pub_, camera_frame_id_, time, input_->K(),
+        publishDepthMap(idepth_pub_, camera_frame_id_, time, K_,
                         idepthmap);
       }
 
@@ -520,14 +387,14 @@ class FlameOffline final {
       }
 
       if (publish_depthmap_) {
-        publishDepthMap(depth_pub_, camera_frame_id_, time, input_->K(),
+        publishDepthMap(depth_pub_, camera_frame_id_, time, K_,
                         depth_est);
       }
 
       if (publish_cloud_) {
         float max_depth = (params_.do_idepth_triangle_filter) ?
             1.0f / params_.min_triangle_idepth : std::numeric_limits<float>::max();
-        publishPointCloud(cloud_pub_, camera_frame_id_, time, input_->K(),
+        publishPointCloud(cloud_pub_, camera_frame_id_, time, K_,
                           depth_est, 0.1f, max_depth);
       }
     }
@@ -557,7 +424,7 @@ class FlameOffline final {
         }
       }
 
-      publishDepthMap(features_pub_, camera_frame_id_, time, input_->K(),
+      publishDepthMap(features_pub_, camera_frame_id_, time, K_,
                       depth_raw);
     }
 
@@ -636,6 +503,7 @@ class FlameOffline final {
     return;
   }
 
+
  private:
   // Keeps track of stats and load.
   fu::StatsTracker stats_;
@@ -665,7 +533,9 @@ class FlameOffline final {
   bool pass_in_truth_; // Pass truth into processing.
 
   // Input stream object.
-  std::shared_ptr<ros_sensor_streams::ASLRGBDOfflineStream> input_;
+
+  Eigen::Matrix3f K_;
+  int width_, height_;
   Eigen::Matrix3f Kinv_;
 
   // Stuff for checking angular rates.
@@ -711,6 +581,16 @@ class FlameOffline final {
 
 }  // namespace flame_ros
 
+template <typename T>
+void getParamOrFail(const ros::NodeHandle& nh, const std::string& name, T* val) {
+  if (!nh.getParam(name, *val)) {
+    ROS_ERROR("Failed to find parameter: %s", nh.resolveName(name, true).c_str());
+    exit(1);
+  }
+  return;
+}
+
+
 int main(int argc, char *argv[]) {
   ros::init(argc, argv, "flame");
 
@@ -721,8 +601,100 @@ int main(int argc, char *argv[]) {
 //  ros::NodeHandle nh("flame");
    ros::NodeHandle pnh("~");
 
-  flame_ros::FlameOffline node(pnh);
-  node.main();
+  std::string pose_path;
+  getParamOrFail(pnh, "pose_path", &pose_path);
+
+  std::string rgb_path;
+  getParamOrFail(pnh, "rgb_path", &rgb_path);
+
+  std::string depth_path;
+  getParamOrFail(pnh, "depth_path", &depth_path);
+
+  std::string world_frame_str;
+  getParamOrFail(pnh, "world_frame", &world_frame_str);
+
+  ros_sensor_streams::ASLRGBDOfflineStream::WorldFrame world_frame;
+  if (world_frame_str == "RDF") {
+    world_frame = ros_sensor_streams::ASLRGBDOfflineStream::WorldFrame::RDF;
+  } else if (world_frame_str == "FLU") {
+    world_frame = ros_sensor_streams::ASLRGBDOfflineStream::WorldFrame::FLU;
+  } else if (world_frame_str == "FRD") {
+    world_frame = ros_sensor_streams::ASLRGBDOfflineStream::WorldFrame::FRD;
+  } else if (world_frame_str == "RFU") {
+    world_frame = ros_sensor_streams::ASLRGBDOfflineStream::WorldFrame::RFU;
+  } else {
+    ROS_ERROR("Unknown world frame!\n");
+    return -1;
+  }
+
+  // Frame ID of the camera in frame camera_world_frame_id.
+  std::string camera_frame_id_;
+
+  // Frame id of the world in camera (Right-Down-Forward) coordinates.
+  std::string camera_world_frame_id_;
+
+  getParamOrFail(pnh, "input/camera_frame_id", &camera_frame_id_);
+  getParamOrFail(pnh, "input/camera_world_frame_id", &camera_world_frame_id_);
+
+  std::shared_ptr<ros_sensor_streams::ASLRGBDOfflineStream> input
+   = std::make_shared<ros_sensor_streams::
+          ASLRGBDOfflineStream>(pnh,
+                                pose_path,
+                                rgb_path,
+                                depth_path,
+                                "camera",
+                                camera_world_frame_id_,
+                                camera_frame_id_,
+                                world_frame);;
+
+   int num_imgs = 0;
+  flame_ros::FlameOffline node(pnh, input->K(), input->width(), input->height());
+  /*==================== Enter main loop ====================*/
+  ros::Rate ros_rate(30);
+
+  while (ros::ok() && !input->empty()) {
+    uint32_t img_id;
+    double time;
+    cv::Mat3b rgb;
+    cv::Mat1f depth;
+    Eigen::Quaterniond q;
+    Eigen::Vector3d t;
+    input->get(&img_id, &time, &rgb, &depth, &q, &t);
+
+
+    if (num_imgs % 1 == 0) {
+      // Eat data.
+      Eigen::Isometry3d eigen_pose = Eigen::Isometry3d::Identity();
+      eigen_pose.linear() = q.toRotationMatrix();
+      eigen_pose.translation() = t;
+      okvis::kinematics::Transformation pose(eigen_pose.matrix());
+
+
+      node.processFrame(img_id, time, pose,
+                   rgb, depth);
+    }
+
+    /*==================== Timing stuff ====================*/
+    // Compute two measures of throughput in Hz. The first is the actual number of
+    // frames per second, the second is the theoretical maximum fps based on the
+    // runtime. They are not necessarily the same - the former takes external
+    // latencies into account.
+
+    // Compute maximum fps based on runtime.
+    double fps_max = 0.0f;
+
+    ros::spinOnce();
+    ros_rate.sleep();
+
+    num_imgs++;
+  }
+
+  if (input->empty()) {
+    ROS_INFO("Finished processing.\n");
+  } else {
+    ROS_ERROR("Unknown error occurred!\n");
+  }
+
 
   return 0;
 }
