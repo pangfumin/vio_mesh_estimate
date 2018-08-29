@@ -35,7 +35,7 @@
 
 #include <Eigen/Core>
 
-#include <sophus/se3.hpp>
+#include <common/kinematics/Transformation.hpp>
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
@@ -305,88 +305,6 @@ class FlameOffline final {
   FlameOffline(FlameOffline&& rhs) = delete;
   FlameOffline& operator=(FlameOffline&& rhs) = delete;
 
-  /**
-   * @brief Compute some statistics using depth groundtruth.
-   */
-  void getTruthStats(double timestamp, const cv::Mat1b& img,
-                     const cv::Mat1f& idepths, const cv::Mat1f& depth,
-                     cv::Mat3b* debug_img_idepth_error) {
-    // Compute confusion matrix.
-    cv::Mat1f idepth_error;
-    float total_error;
-    int true_pos, false_pos, true_neg, false_neg;
-    getDepthConfusionMatrix(idepths, depth, &idepth_error, &total_error,
-                            &true_pos, &true_neg, &false_pos, &false_neg);
-
-    // Compute some stats.
-    float precision = static_cast<float>(true_pos) / (true_pos + false_pos);
-    float recall = static_cast<float>(true_pos) / (true_pos + false_neg);
-
-    float avg_error_per_pixel = total_error / (true_pos + false_pos);
-
-    // Apply colomap.
-    auto colormap = [this](float v, cv::Vec3b c) {
-      return std::isnan(v) ? c : flame::utils::jet(v, 0.0f, 0.35f);
-    };
-    cv::cvtColor(img, *debug_img_idepth_error, cv::COLOR_GRAY2RGB);
-    flame::utils::applyColorMap<float>(idepth_error, colormap,
-                                       debug_img_idepth_error);
-
-    // Print some info.
-    char buf[200];
-    snprintf(buf, sizeof(buf), "TotalError: %.3f, AvgError: %.3f, Prec: %.3f, Rec: %.3f",
-             total_error, avg_error_per_pixel, precision, recall);
-    cv::putText(*debug_img_idepth_error, buf,
-                cv::Point(10, debug_img_idepth_error->rows - 5),
-                cv::FONT_HERSHEY_SIMPLEX, 0.4, cv::Scalar(200, 200, 250), 1, 8);
-
-    std::string stats_fname(output_dir_ + "/stats.txt");
-    FILE* fid = fopen(stats_fname.c_str(), "a");
-    if (fid == nullptr) {
-      ROS_ERROR("Could not open statistics file!\n");
-      return;
-    }
-
-    if (num_imgs_ == 0) {
-      fprintf(fid, "idx ");
-      fprintf(fid, "timestamp ");
-      fprintf(fid, "runtime ");
-      fprintf(fid, "num_vtx ");
-      fprintf(fid, "num_tris ");
-      fprintf(fid, "true_pos ");
-      fprintf(fid, "true_neg ");
-      fprintf(fid, "false_pos ");
-      fprintf(fid, "false_neg ");
-      fprintf(fid, "total_idepth_error ");
-      fprintf(fid, "avg_idepth_error ");
-      fprintf(fid, "precision ");
-      fprintf(fid, "recall ");
-      fprintf(fid, "total_photo_error ");
-      fprintf(fid, "avg_photo_error");
-      fprintf(fid, "\n");
-    }
-
-    fprintf(fid, "%i ", num_imgs_);
-    fprintf(fid, "%.6f ", timestamp);
-    fprintf(fid, "%.6f ", sensor_->stats().timings("sense"));
-    fprintf(fid, "%i ", static_cast<int>(sensor_->stats().stats("num_vtx")));
-    fprintf(fid, "%i ", static_cast<int>(sensor_->stats().stats("num_tris")));
-    fprintf(fid, "%i ", true_pos);
-    fprintf(fid, "%i ", true_neg);
-    fprintf(fid, "%i ", false_pos);
-    fprintf(fid, "%i ", false_neg);
-    fprintf(fid, "%.6f ", total_error);
-    fprintf(fid, "%.6f ", avg_error_per_pixel);
-    fprintf(fid, "%.6f ", precision);
-    fprintf(fid, "%.6f ", recall);
-    fprintf(fid, "%.6f ", sensor_->stats().stats("total_photo_error"));
-    fprintf(fid, "%.6f", sensor_->stats().stats("avg_photo_error"));
-    fprintf(fid, "\n");
-
-    fclose(fid);
-
-    return;
-  }
 
   /**
    * @brief Main processing loop.
@@ -426,7 +344,13 @@ class FlameOffline final {
 
       if (num_imgs_ % subsample_factor_ == 0) {
         // Eat data.
-        processFrame(img_id, time, Sophus::SE3f(q.cast<float>(), t.cast<float>()),
+        Eigen::Isometry3d eigen_pose = Eigen::Isometry3d::Identity();
+        eigen_pose.linear() = q.toRotationMatrix();
+        eigen_pose.translation() = t;
+          okvis::kinematics::Transformation pose(eigen_pose.matrix());
+
+
+          processFrame(img_id, time, pose,
                      rgb, depth);
       }
 
@@ -499,7 +423,7 @@ class FlameOffline final {
   }
 
   void processFrame(const uint32_t img_id, const double time,
-                    const Sophus::SE3f& pose, const cv::Mat3b& rgb,
+                    const okvis::kinematics::Transformation& pose, const cv::Mat3b& rgb,
                     const cv::Mat1f& depth) {
     stats_.tick("process_frame");
 
@@ -539,8 +463,8 @@ class FlameOffline final {
     if (max_angular_rate_ > 0.0f) {
       // Check angle difference between last and current pose. If we're rotating,
       // we shouldn't publish output since it's probably too noisy.
-      Eigen::Quaternionf q_delta = pose.unit_quaternion() *
-          prev_pose_.unit_quaternion().inverse();
+      Eigen::Quaternionf q_delta = pose.hamilton_quaternion().cast<float>() *
+          prev_pose_.hamilton_quaternion().inverse().cast<float>();
       float angle_delta = fu::fast_abs(Eigen::AngleAxisf(q_delta).angle());
       float angle_rate = angle_delta / (time - prev_time_);
 
@@ -749,7 +673,7 @@ class FlameOffline final {
   // Stuff for checking angular rates.
   float max_angular_rate_;
   double prev_time_;
-  Sophus::SE3f prev_pose_;
+  okvis::kinematics::Transformation prev_pose_;
 
   // Depth sensor.
   flame::Params params_;

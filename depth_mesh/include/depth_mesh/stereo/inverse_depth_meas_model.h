@@ -26,7 +26,7 @@
 
 #include <Eigen/Core>
 
-#include <sophus/se3.hpp>
+#include <common/kinematics/Transformation.hpp>
 
 #include "depth_mesh/stereo/epipolar_geometry.h"
 
@@ -65,10 +65,10 @@ class InverseDepthMeasModel final {
   /**
    * @brief Load geometry data.
    */
-  void loadGeometry(const Sophus::SE3f& T_ref, const Sophus::SE3f& T_cmp) {
+  void loadGeometry(const okvis::kinematics::Transformation& T_ref, const okvis::kinematics::Transformation& T_cmp) {
     T_ref_to_cmp_ = T_cmp.inverse() * T_ref;
-    epigeo_.loadGeometry(T_ref_to_cmp_.unit_quaternion(),
-                         T_ref_to_cmp_.translation());
+    epigeo_.loadGeometry(T_ref_to_cmp_.hamilton_quaternion().cast<float>(),
+                         T_ref_to_cmp_.r().cast<float>());
     inited_geo_ = true;
     return;
   }
@@ -155,7 +155,7 @@ class InverseDepthMeasModel final {
   cv::Mat1f gradx_cmp_;
   cv::Mat1f grady_cmp_;
 
-  Sophus::SE3f T_ref_to_cmp_;
+  okvis::kinematics::Transformation T_ref_to_cmp_;
   stereo::EpipolarGeometry<float> epigeo_;
 };
 

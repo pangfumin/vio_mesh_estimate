@@ -79,7 +79,7 @@ Eigen::Vector4d distort0, distort1;
 int imageWidth, imageHeight;
 
 flame::Params mesh_est_param;
-std::shared_ptr<flame::MeshEstimator> mesh_estimator;
+//std::shared_ptr<flame::MeshEstimator> mesh_estimator;
 okvis::threadsafe::ThreadSafeQueue<UpdateMeshInfo> meshUpdateInfoThreadSafeQueue;
 
 
@@ -670,12 +670,12 @@ int main(int argc, char **argv)
 //    const Eigen::VectorXd cam0_intrinsic = camera_system->getCamera(0).getParameters();
 //    const Eigen::VectorXd cam1_intrinsic = camera_system->getCamera(1).getParameters();
 
-    mesh_estimator = std::make_shared<flame::MeshEstimator>(imageWidth, imageHeight,
-                                             K0.cast<float>(), K0.inverse().cast<float>(),
-                                             distort0.cast<float>(),
-                                             K1.cast<float>(), K1.inverse().cast<float>(),
-                                             distort1.cast<float>(),
-                                             mesh_est_param);
+//    mesh_estimator = std::make_shared<flame::MeshEstimator>(imageWidth, imageHeight,
+//                                             K0.cast<float>(), K0.inverse().cast<float>(),
+//                                             distort0.cast<float>(),
+//                                             K1.cast<float>(), K1.inverse().cast<float>(),
+//                                             distort1.cast<float>(),
+//                                             mesh_est_param);
 
 
     std::thread imu_images_synchronize{synchronize};

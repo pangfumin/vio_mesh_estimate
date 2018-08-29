@@ -30,7 +30,7 @@
 #include <Eigen/Geometry>
 #include <Eigen/LU>
 
-#include <sophus/se3.hpp>
+#include <common/kinematics/Transformation.hpp>
 
 namespace flame {
 
@@ -123,11 +123,11 @@ using AngleAxis = Eigen::AngleAxis<T>;
 using AngleAxisf = AngleAxis<float>;
 using AngleAxisd = AngleAxis<double>;
 
-/*==================== Lie group types. ====================*/
-template <typename T>
-using SE3 = Sophus::SE3Group<T>;
-
-using SE3f = SE3<float>;
-using SE3d = SE3<double>;
+///*==================== Lie group types. ====================*/
+//template <typename T>
+//using SE3 = Sophus::SE3Group<T>;
+//
+//using SE3f = SE3<float>;
+//using SE3d = SE3<double>;
 
 }  // namespace flame

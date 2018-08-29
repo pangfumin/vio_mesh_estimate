@@ -142,7 +142,7 @@ class Flame final {
    * @param[in] idepths_true True inverse depths (for debugging).
    * @return True if update successful. Outputs are only valid if returns True.
    */
-  bool update(double time, uint32_t img_id, const Sophus::SE3f& T_new,
+  bool update(double time, uint32_t img_id, const okvis::kinematics::Transformation& T_new,
               const Image1b& img_new, bool is_poseframe,
               const Image1f& idepths_true = Image1f());
 
@@ -297,14 +297,6 @@ class Flame final {
     // Synchronizes graph with updated features.
   void graphSyncLoop();
 
-  // Get the best poseframe for frame fnew.
-  static utils::Frame::ConstPtr getPoseFrame(const Params& params,
-                                             const Matrix3f& K,
-                                             const Matrix3f& Kinv,
-                                             const FrameIDToFrame& pfs,
-                                             const utils::Frame& fnew,
-                                             int max_pfs,
-                                             utils::StatsTracker* stats);
 
   static void detectFeatures(const Params& params,
                              const Matrix3f& K,

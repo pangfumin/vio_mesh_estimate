@@ -35,7 +35,6 @@
 
 #include "depth_mesh/utils/visualization.h"
 #include "depth_mesh/utils/image_utils.h"
-#include "depth_mesh/utils/keyframe_selector.h"
 
 namespace flame {
 
@@ -117,7 +116,7 @@ Flame::~Flame() {
 }
 
 bool Flame::update(double time, uint32_t img_id,
-                   const Sophus::SE3f& T_new,
+                   const okvis::kinematics::Transformation& T_new,
                    const Image1b& img_new,
                    bool is_poseframe,
                    const Image1f& idepths_true) {
@@ -195,7 +194,7 @@ bool Flame::update(double time, uint32_t img_id,
   }
 
   // Load epipolar geometry between previous and new frame.
-  Sophus::SE3f T_prev_to_new = fnew_->pose.inverse() * fprev_->pose;
+  okvis::kinematics::Transformation T_prev_to_new = fnew_->pose.inverse() * fprev_->pose;
 //  epigeo_.loadGeometry(T_prev_to_new.unit_quaternion(),
 //                       T_prev_to_new.translation());
 
@@ -241,8 +240,8 @@ bool Flame::update(double time, uint32_t img_id,
   }
 
   /*==================== Get current smoothed solution  ====================*/
-  epigeo_.loadGeometry(T_prev_to_new.unit_quaternion(),
-                       T_prev_to_new.translation());
+  epigeo_.loadGeometry(T_prev_to_new.hamilton_quaternion().cast<float>(),
+                       T_prev_to_new.r().cast<float>());
 
   // Project graph into new frame.
   graph_mtx_.lock();
@@ -663,52 +662,6 @@ void Flame::detectFeatures(DetectionData& data) {
   }
 }
 
-utils::Frame::ConstPtr Flame::getPoseFrame(const Params& params,
-                                           const Matrix3f& K,
-                                           const Matrix3f& Kinv,
-                                           const FrameIDToFrame& pfs,
-                                           const utils::Frame& fnew,
-                                           int max_pfs,
-                                           utils::StatsTracker* stats) {
-  stats->tick("poseframe");
-
-  // Pick past pf to use for comparison.
-  float best_score = std::numeric_limits<float>::lowest();
-  utils::Frame::Ptr pf = nullptr;
-  int best_idx = 0;
-
-  // We walk backwards through the pfs (i.e. backwarfs in time), considering a
-  // maximum of max_pfs and take the one with the best score.
-  auto pfi = pfs.crbegin(); // Const reverse iterator.
-  auto rend = pfs.crend();
-  for (int ii = 0; ii < max_pfs; ++ii) {
-    if (pfi->second->id != fnew.id) {
-      float score =
-          utils::KeyFrameSelector::score(fnew.img[0].cols, fnew.img[0].rows,
-                                         K, Kinv,
-                                         pfi->second->pose.inverse() * fnew.pose,
-                                         1.0f, 50.0f);
-      if (score > best_score) {
-        best_score = score;
-        pf = pfi->second;
-        best_idx = ii;
-      }
-    }
-
-    pfi++;
-    if (pfi == rend) {
-      break;
-    }
-  }
-
-  stats->tock("poseframe");
-  if (!params.debug_quiet && params.debug_print_timing_poseframe) {
-    printf("Flame/poseframe = %f ms, picked %i/%i\n",
-           stats->timings("poseframe"), best_idx, max_pfs);
-  }
-
-  return pf;
-}
 
 void Flame::detectFeatures(const Params& params,
                            const Matrix3f& K,
@@ -1094,9 +1047,9 @@ void Flame::detectFeatures(const Params& params,
   }
 
   // Load epipolar geometry from prev to ref.
-  Sophus::SE3f T_ref_to_prev(fprev.pose.inverse() * fref.pose);
-  epigeo.loadGeometry(T_ref_to_prev.unit_quaternion(),
-                      T_ref_to_prev.translation());
+  okvis::kinematics::Transformation T_ref_to_prev(fprev.pose.inverse() * fref.pose);
+  epigeo.loadGeometry(T_ref_to_prev.hamilton_quaternion().cast<float>(),
+                      T_ref_to_prev.r().cast<float>());
 
   // Coarse pass.
   Image1f score(height, width, std::numeric_limits<float>::quiet_NaN());
@@ -1201,13 +1154,13 @@ bool Flame::updateFeatureIDepths(const Params& params,
     FeatureWithIDepth& fii = (*feats)[ii];
 
     // Load geometry.
-    Sophus::SE3f T_ref_to_new = fnew.pose.inverse() * pfs.at(fii.frame_id)->pose;
-    Sophus::SE3f T_new_to_ref = pfs.at(fii.frame_id)->pose.inverse() * fnew.pose;
-    epigeo.loadGeometry(T_ref_to_new.unit_quaternion(),
-                        T_ref_to_new.translation());
+    okvis::kinematics::Transformation T_ref_to_new = fnew.pose.inverse() * pfs.at(fii.frame_id)->pose;
+    okvis::kinematics::Transformation T_new_to_ref = pfs.at(fii.frame_id)->pose.inverse() * fnew.pose;
+    epigeo.loadGeometry(T_ref_to_new.hamilton_quaternion().cast<float>(),
+                        T_ref_to_new.r().cast<float>());
 
     // Check baseline.
-    float baseline = T_ref_to_new.translation().norm();
+    float baseline = T_ref_to_new.r().norm();
     if (baseline < params.min_baseline) {
       // Not enough baseline. Skip.
       continue;
@@ -1498,9 +1451,9 @@ bool Flame::trackFeature(const Params& params,
     // If this feature has converged already, move it so that it's parent
     // pose is the most recent poseframe frame rather than throw it away.
     stereo::EpipolarGeometry<float> epipf(K, Kinv);
-    Sophus::SE3f T_old_to_new = curr_pf.pose.inverse() * pfs.at(feat->frame_id)->pose;
-    epipf.loadGeometry(T_old_to_new.unit_quaternion(),
-                       T_old_to_new.translation());
+    okvis::kinematics::Transformation T_old_to_new = curr_pf.pose.inverse() * pfs.at(feat->frame_id)->pose;
+    epipf.loadGeometry(T_old_to_new.hamilton_quaternion().cast<float>(),
+                       T_old_to_new.r().cast<float>());
 
     cv::Point2f u_pf;
     float idepth_pf, var_pf;
@@ -1672,10 +1625,10 @@ void Flame::projectFeatures(const Params& params,
     // Load geometry.
     stereo::EpipolarGeometry<float> epigeo(K, Kinv);
     auto& fref = pfs.at(feat_ref.frame_id);
-    Sophus::SE3f T_ref_to_cur = fcur.pose.inverse() * fref->pose;
-    Sophus::SE3f T_cur_to_ref = fref->pose.inverse() * fcur.pose;
-    epigeo.loadGeometry(T_ref_to_cur.unit_quaternion(),
-                        T_ref_to_cur.translation());
+    okvis::kinematics::Transformation T_ref_to_cur = fcur.pose.inverse() * fref->pose;
+    okvis::kinematics::Transformation T_cur_to_ref = fref->pose.inverse() * fcur.pose;
+    epigeo.loadGeometry(T_ref_to_cur.hamilton_quaternion().cast<float>(),
+                        T_ref_to_cur.r().cast<float>());
 
     if (!feat_ref.valid) {
       feat_cur.valid = false;
@@ -1861,7 +1814,8 @@ bool Flame::syncGraph(const Params& params,
     Vector3f pix(feat.xy.x, feat.xy.y, 1.0f);
     pix /= idepth;
     Vector3f xyz(Kinv * pix);
-    xyz = pfs.at(feat.frame_id)->pose * xyz;
+    okvis::kinematics::Transformation pose = pfs.at(feat.frame_id)->pose;
+    xyz = pose.hamilton_quaternion().toRotationMatrix().cast<float>()* xyz + pose.r().cast<float>();
 
     if (feat.valid && (var < params.idepth_var_max_graph)
         && (-xyz(1) >= params.min_height) && (-xyz(1) <= params.max_height)) {

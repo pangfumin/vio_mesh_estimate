@@ -32,7 +32,7 @@ namespace flame {
         cv::Mat img_gray_undist;
         cv::undistort(img_gray, img_gray_undist, Kcv_, Dcv_);
 
-        SE3d pose(T_WC.C(), T_WC.r());
+
 //        std::cout<< T_WC.T() << std::endl;
 //        std::cout<< pose.unit_quaternion().toRotationMatrix() << std::endl;
 
@@ -41,7 +41,7 @@ namespace flame {
 
         bool update_success = false;
 
-        update_success = sensor_->update(time, img_id_, pose.cast<float>(), img_gray_undist,
+        update_success = sensor_->update(time, img_id_, T_WC, img_gray_undist,
                                              is_poseframe);
         img_id_ ++;
 //        if (!update_success) {

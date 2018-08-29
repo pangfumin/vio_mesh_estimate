@@ -27,7 +27,7 @@
 #include <ros/ros.h>
 #include <nodelet/nodelet.h>
 
-#include <sophus/se3.hpp>
+#include <common/kinematics/Transformation.hpp>
 
 #include <cv_bridge/cv_bridge.h>
 
@@ -184,7 +184,7 @@ void TrackedImageStream::callback(const sensor_msgs::Image::ConstPtr& rgb_msg,
     return;
   }
 
-  Sophus::SE3f pose;
+  okvis::kinematics::Transformation pose;
   tfToSophusSE3<float>(tf.transform, &pose);
 
   Frame frame;
