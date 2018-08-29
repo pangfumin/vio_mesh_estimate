@@ -20,7 +20,7 @@
  * @date 2016-10-06 20:43:34 (Thu)
  */
 
-#include <depth_mesh/optimizers/nltgv2_l1_graph_regularizer.h>
+#include "depth_mesh/optimizers/nltgv2_l1_graph_regularizer.h"
 
 #include <limits>
 

@@ -3,62 +3,51 @@
 #include <opencv2/highgui/highgui.hpp>
 #include <opencv2/core/eigen.hpp>
 
-
 namespace flame {
 
-    MeshEstimator::MeshEstimator( int width, int height,
-                                 const Matrix3f& K0, const Matrix3f& K0inv,
-                                 const Vector4f& distort0,
-                                 const Matrix3f& K1, const Matrix3f& K1inv,
-                                 const Vector4f& distort1,
+    uint64_t MeshEstimator::img_id_ = 0;
+    MeshEstimator::MeshEstimator(int width, int height,
+                                 const Matrix3f& K, const Matrix3f& Kinv,
+                                 const Vector4f& distort,
                                  const Params& parameters):
             params_(parameters),
-            poseframe_subsample_factor_(6){
+            poseframe_subsample_factor_(6) {
 
-        cv::eigen2cv(K0, K0cv_);
-        cv::eigen2cv(distort0, D0cv_);
-
-        cv::eigen2cv(K1, K1cv_);
-        cv::eigen2cv(distort1, D1cv_);
+        cv::eigen2cv(K, Kcv_);
+        cv::eigen2cv(distort, Dcv_);
 
         sensor_ = std::make_shared<flame::Flame>(width,
                                                  height,
-                                                 K0,
-                                                 K0inv,
-                                                 K1,
-                                                 K1inv,
+                                                 K,
+                                                 Kinv,
                                                  params_);
 
     }
 
-    void MeshEstimator::processFrame( const okvis::Time time, int64_t img_id,
-                      const okvis::kinematics::Transformation& T_WC0,
-                                      const cv::Mat& img_gray0,
-                                      const okvis::kinematics::Transformation& T_WC1,
-                                      const cv::Mat& img_gray1,bool isKeyframe) {
+    void MeshEstimator::processFrame( const double time,
+                      const okvis::kinematics::Transformation& T_WC,
+                                      const cv::Mat& img_gray, bool isKeyframe) {
 //
         /*==================== Process image ====================*/
-        cv::Mat img_gray_undist0;
-        cv::undistort(img_gray0, img_gray_undist0, K0cv_, D0cv_);
+        cv::Mat img_gray_undist;
+        cv::undistort(img_gray, img_gray_undist, Kcv_, Dcv_);
 
-        cv::Mat img_gray_undist1;
-        cv::undistort(img_gray1, img_gray_undist1, K1cv_, D1cv_);
+        SE3d pose(T_WC.C(), T_WC.r());
+//        std::cout<< T_WC.T() << std::endl;
+//        std::cout<< pose.unit_quaternion().toRotationMatrix() << std::endl;
+
 
         bool is_poseframe = isKeyframe;
 
         bool update_success = false;
 
-        update_success = sensor_->update(time, img_id,
-                T_WC0, img_gray_undist0,
-                                        T_WC1, img_gray_undist1,
+        update_success = sensor_->update(time, img_id_, pose.cast<float>(), img_gray_undist,
                                              is_poseframe);
+        img_id_ ++;
 //        if (!update_success) {
 //            //ROS_WARN("FlameOffline: Unsuccessful update.\n");
 //            return;
 //        }
-
-        sensor_->updateKeyframePose();
-
         Image3b wireImage = sensor_->getDebugImageWireframe();
 //        Image3b wireImage = sensor_->getDebugImageFeatures();
         cv::imshow("wireImage", wireImage);
@@ -70,16 +59,5 @@ namespace flame {
 //        // todo : add publish and result into buffer
 
     }
-
-    const Image3b& MeshEstimator::getDebugImageWireframe() {
-        return sensor_->getDebugImageWireframe();
-    }
-
-    const Image3b& MeshEstimator::getDebugImageInverseDepthMap() {
-        return sensor_->getDebugImageInverseDepthMap();;
-    }
-
-
-
 
 }

@@ -32,7 +32,7 @@
 #include <sstream>
 #include <thread>
 
-#include "flame/utils/assert.h"
+#include "depth_mesh/utils/assert.h"
 
 namespace flame {
 

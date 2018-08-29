@@ -15,9 +15,9 @@
 
 #include "gtest/gtest.h"
 
-#include "flame/stereo/epipolar_geometry.h"
-#include "flame/stereo/inverse_depth_filter.h"
-#include "flame/params.h"
+#include "depth_mesh/stereo/epipolar_geometry.h"
+#include "depth_mesh/stereo/inverse_depth_filter.h"
+#include "depth_mesh/params.h"
 
 namespace flame {
 

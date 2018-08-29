@@ -12,4 +12,13 @@
   <depend>eigen_catkin</depend>
   <depend>opencv3_catkin</depend>
   <depend>common</depend>
+  <depend>pcl_conversions</depend>
+  <depend>pcl_ros</depend>
+  <depend>roscpp</depend>
+  <depend>sensor_msgs</depend>
+  <depend>image_transport</depend>
+  <depend>cv_bridge</depend>
+  <depend>dynamic_reconfigure</depend>
+  <depend>geometry_msgs</depend>
+  <depend>image_geometry</depend>
 </package>

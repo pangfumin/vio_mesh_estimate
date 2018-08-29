@@ -35,7 +35,6 @@
 #include <opencv2/core/core.hpp>
 #include <opencv2/features2d/features2d.hpp>
 
-
 #include "depth_mesh/types.h"
 #include "depth_mesh/params.h"
 
@@ -68,17 +67,18 @@ using VtxHandleToIdx = std::unordered_map<VertexHandle, uint32_t>;
 
 // Needs to be an ordered map so that we can itereate in frame_id order in
 // getPoseFrame.
-using FrameIDToFrame = std::map<uint64_t, utils::Frame::Ptr>;
+using FrameIDToFrame = std::map<uint32_t, utils::Frame::Ptr>;
 
 /**
  * @brief Struct to hold data needed for feature detection.
  */
 struct DetectionData {
   explicit DetectionData(int num_lvls = 1):
-      ref(num_lvls), prev(num_lvls),  ref_xy() {}
+      ref(num_lvls), prev(num_lvls), cmp(num_lvls), ref_xy() {}
 
   utils::Frame ref; // Reference frame.
   utils::Frame prev; // Previous frame.
+  utils::Frame cmp; // Comparison frame.
   std::vector<Point2f> ref_xy; // Current feature locations in ref frame.
 };
 
@@ -86,8 +86,8 @@ struct DetectionData {
  * @brief Struct to hold feature data.
  */
 struct FeatureWithIDepth {
-  uint64_t id = 0;
-  uint64_t frame_id = 0;
+  uint32_t id = 0;
+  uint32_t frame_id = 0;
   Point2f xy;
   float idepth_mu = 0.0f;
   float idepth_var = 0.0f;
@@ -120,9 +120,8 @@ class Flame final {
    * @param[Kinv] Kinv Inverse of the camera intrinsics matrix.
    * @param[in] params Parameter struct.
    */
-  Flame( int width, int height,
-        const Matrix3f& K0, const Matrix3f& K0inv,
-        const Matrix3f& K1, const Matrix3f& K1inv,
+  Flame(int width, int height,
+        const Matrix3f& K, const Matrix3f& Kinv,
         const Params& params = Params());
   ~Flame();
 
@@ -143,16 +142,21 @@ class Flame final {
    * @param[in] idepths_true True inverse depths (for debugging).
    * @return True if update successful. Outputs are only valid if returns True.
    */
-  bool update(okvis::Time time, uint32_t img_id,
-              const okvis::kinematics::Transformation & T_new0,
-              const Image1b& img_new0,
-              const okvis::kinematics::Transformation & T_new1,
-              const Image1b& img_new1,
-              bool is_poseframe,
+  bool update(double time, uint32_t img_id, const Sophus::SE3f& T_new,
+              const Image1b& img_new, bool is_poseframe,
               const Image1f& idepths_true = Image1f());
 
 
-  void updateKeyframePose();
+
+  /**
+   * @brief Prune poseframes.
+   *
+   * Features defined relative to a removed poseframe will be transferred to the
+   * latest poseframe.
+   *
+   * @param[in] pfs_to_keep IDs of the poseframes to keep.
+   */
+  void prunePoseFrames(const std::vector<uint32_t>& pfs_to_keep);
 
   /**
    * @brief Clear everything.
@@ -288,7 +292,20 @@ class Flame final {
 
  private:
 
-  void detectFeatures(DetectionData& data);
+    void detectFeatures(DetectionData& data);
+
+    // Synchronizes graph with updated features.
+  void graphSyncLoop();
+
+  // Get the best poseframe for frame fnew.
+  static utils::Frame::ConstPtr getPoseFrame(const Params& params,
+                                             const Matrix3f& K,
+                                             const Matrix3f& Kinv,
+                                             const FrameIDToFrame& pfs,
+                                             const utils::Frame& fnew,
+                                             int max_pfs,
+                                             utils::StatsTracker* stats);
+
   static void detectFeatures(const Params& params,
                              const Matrix3f& K,
                              const Matrix3f& Kinv,
@@ -303,19 +320,14 @@ class Flame final {
 
   // Update the depth estimates.
   static bool updateFeatureIDepths(const Params& params,
-                                   const Matrix3f& K0,
-                                   const Matrix3f& K0inv,
-                                   const Matrix3f& K1,
-                                   const Matrix3f& K1inv,
+                                   const Matrix3f& K,
+                                   const Matrix3f& Kinv,
                                    const FrameIDToFrame& pfs,
                                    const utils::Frame& fnew,
-                                   const utils::Frame& fnew_right,
                                    const utils::Frame& curr_pf,
                                    std::vector<FeatureWithIDepth>* feats,
                                    utils::StatsTracker* stats,
                                    Image3b* debug_img);
-
-
 
   // Track a single feature in the new image.
   static bool trackFeature(const Params& params,
@@ -328,20 +340,6 @@ class Flame final {
                            FeatureWithIDepth* feat,
                            Point2f* flow, float* residual,
                            Image3b* debug_img);
-
-  static bool trackFeatureRight(const Params& params,
-                                  const Matrix3f& K0,
-                                  const Matrix3f& K0inv,
-                                const Matrix3f& K1,
-                                const Matrix3f& K1inv,
-                                  const FrameIDToFrame& pfs,
-                                  const stereo::EpipolarGeometry<float>& epigeo,
-                                  const utils::Frame& fnew,
-                                  const utils::Frame& curr_pf,
-                                  FeatureWithIDepth* feat,
-                                  cv::Point2f* flow,
-                                  float* residual,
-                                  Image3b* debug_img);
 
   // Project features into current frame.
   static void projectFeatures(const Params& params,
@@ -482,15 +480,13 @@ class Flame final {
   int width_;
   int height_;
 
-  Matrix3f K0_;
-  Matrix3f K0inv_;
-    Matrix3f K1_;
-    Matrix3f K1inv_;
+  Matrix3f K_;
+  Matrix3f Kinv_;
 
+  stereo::EpipolarGeometry<float> epigeo_;
 
   uint32_t num_imgs_;
   utils::Frame::Ptr fnew_; // New frame.
-  utils::Frame::Ptr fnew_right_; // New frame.
   utils::Frame::Ptr fprev_; // Previous frame.
 
   // Lock when performing an update or accessing internals.
@@ -535,8 +531,6 @@ class Flame final {
   Image1f idepthmap_; // Dense idepthmap.
   Image1f w1_map_; // Dense plane parameters.
   Image1f w2_map_; // Dense plane parameters.
-
-
 
   // // Debug images.
   Image3b debug_img_detections_;

@@ -35,7 +35,7 @@
 
 #include "gtest/gtest.h"
 
-#include "flame/stereo/epipolar_geometry.h"
+#include "depth_mesh/stereo/epipolar_geometry.h"
 
 namespace flame {
 

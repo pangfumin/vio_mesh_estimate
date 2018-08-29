@@ -21,9 +21,8 @@
  */
 
 #include "depth_mesh/utils/frame.h"
-#include <iostream>
+
 #include <limits>
-#include <common/kinematics/Transformation.hpp>
 
 #include "depth_mesh/utils/pyramids.h"
 
@@ -31,12 +30,10 @@ namespace flame {
 
 namespace utils {
 
-Frame::Ptr Frame::create(const okvis::Time time, const okvis::kinematics::Transformation& pose,
-        const Image1b& img,
+Frame::Ptr Frame::create(const SE3f& pose, const Image1b& img,
                          int id, int num_levels, int border) {
   Frame::Ptr frame = std::make_shared<Frame>(num_levels);
 
-  frame->time = time;
   frame->id = id;
   frame->pose = pose;
 
@@ -72,8 +69,6 @@ Frame::Ptr Frame::create(const okvis::Time time, const okvis::kinematics::Transf
 
   return frame;
 }
-
-
 
 }  // namespace utils
 

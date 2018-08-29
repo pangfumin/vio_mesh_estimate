@@ -26,7 +26,8 @@
 
 #include <Eigen/Core>
 
-#include <common/kinematics/Transformation.hpp>
+#include <sophus/se3.hpp>
+
 #include "depth_mesh/stereo/epipolar_geometry.h"
 
 namespace flame {
@@ -50,10 +51,8 @@ class InverseDepthMeasModel final {
     bool verbose = false; // Print verbose errors.
   };
 
-  InverseDepthMeasModel(const Eigen::Matrix3f& K0,
-                        const Eigen::Matrix3f& K0inv,
-                        const Eigen::Matrix3f& K1,
-                        const Eigen::Matrix3f& K1inv,
+  InverseDepthMeasModel(const Eigen::Matrix3f& K,
+                        const Eigen::Matrix3f& Kinv,
                         const Params& params = Params());
   ~InverseDepthMeasModel() = default;
 
@@ -66,10 +65,10 @@ class InverseDepthMeasModel final {
   /**
    * @brief Load geometry data.
    */
-  void loadGeometry(const okvis::kinematics::Transformation& T_ref, const okvis::kinematics::Transformation& T_cmp) {
+  void loadGeometry(const Sophus::SE3f& T_ref, const Sophus::SE3f& T_cmp) {
     T_ref_to_cmp_ = T_cmp.inverse() * T_ref;
-    epigeo_.loadGeometry(T_ref_to_cmp_.hamilton_quaternion().cast<float>(),
-                         T_ref_to_cmp_.r().cast<float>());
+    epigeo_.loadGeometry(T_ref_to_cmp_.unit_quaternion(),
+                         T_ref_to_cmp_.translation());
     inited_geo_ = true;
     return;
   }
@@ -156,7 +155,7 @@ class InverseDepthMeasModel final {
   cv::Mat1f gradx_cmp_;
   cv::Mat1f grady_cmp_;
 
-  okvis::kinematics::Transformation T_ref_to_cmp_;
+  Sophus::SE3f T_ref_to_cmp_;
   stereo::EpipolarGeometry<float> epigeo_;
 };
 

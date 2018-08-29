@@ -55,7 +55,7 @@ struct Params {
 
   // Bounds for idepth search region.
   float idepth_min = 1e-3;
-  float idepth_max = 5.0f;
+  float idepth_max = 2.0f;
 
   // Bounds for epipolar search region.
   float epilength_min = 3.0f;
