@@ -156,8 +156,10 @@ int main(int argc, char *argv[]) {
   okvis::kinematics::Transformation pose(eigen_pose.matrix());
 
 
+  cv::Mat img_gray;
+  cv::cvtColor(img_gray, rgb, CV_GRAY2BGR);
   node.processFrame(img_id, time, pose,
-               rgb, depth, isKeyframe);
+               rgb, isKeyframe);
 
 
     // Compute maximum fps based on runtime.

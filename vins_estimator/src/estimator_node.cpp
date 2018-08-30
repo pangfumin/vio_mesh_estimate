@@ -371,8 +371,9 @@ void integrateInterframeImuRotation(
     *q_Ikp1_Ik = q_Ikp1_Ik->inverse();
 }
 
-okvis::Time last_images_ts = okvis::Time(0.0);
 void synchronize() {
+    okvis::Time last_images_ts = okvis::Time(0.0);
+
     for (;;) {
         okvis::StereoCameraMeasurement stereoCameraMeasurement;
         if (stereoCameraThreadSafeQueue.PopBlocking(&stereoCameraMeasurement) == false)
@@ -408,7 +409,7 @@ void track_featrues() {
                 0, imuImagesPackage.second.measurement.image0,
                 imuImagesPackage.second.timeStamp.toNSec(), 10);
         visual_pipeline->processImageBlockingIfFull(
-                1, imuImagesPackage.second.measurement.image0,
+                1, imuImagesPackage.second.measurement.image1,
                 imuImagesPackage.second.timeStamp.toNSec(), 10);
 
         aslam::VisualNFrame::Ptr new_nframe;
@@ -430,12 +431,6 @@ void track_featrues() {
 
             std::cout<< "Timing: " << timing.toc() << " " << inlier_matches_kp1_k[0].size() << std::endl;
 
-//            inliner_mutex.lock();
-//            feature_tracking_avalible = true;
-//            inliner_view0_ft = voFeatureTrackingPipeline->inliner_view0;
-//            inliner_view1_ft = voFeatureTrackingPipeline->inliner_view1;
-//            inliner_mutex.unlock();
-
             cv_bridge::CvImage out_msg;
             std_msgs::Header header;
             header.stamp = ros::Time::now();
@@ -443,7 +438,6 @@ void track_featrues() {
             out_msg.header   = header; // Same timestamp and tf frame as input image
             out_msg.encoding = sensor_msgs::image_encodings::RGB8; // Or whatever
             out_msg.image    = voFeatureTrackingPipeline->inliner_view0; // Your cv::Mat
-
 
             pub_match.publish(out_msg.toImageMsg());
 
@@ -482,6 +476,20 @@ void track_featrues() {
             std::pair<okvis::ImuMeasurementDeque, StereoFeatures>
                     imuFeaturesPackage = std::make_pair(imuImagesPackage.first, stereoFeatures);
 
+
+//            cv_bridge::CvImage out_msg0;
+//            std_msgs::Header header0;
+//            header0.stamp = ros::Time::now();
+//            header0.frame_id = "world";
+//            out_msg0.header   = header; // Same timestamp and tf frame as input image
+//            out_msg0.encoding = sensor_msgs::image_encodings::RGB8; // Or whatever
+//            out_msg0.image    = imuImagesPackage.second.measurement.image0; // Your cv::Mat
+//
+            std::cout<< "image size0: " <<  imuImagesPackage.second.measurement.image0.cols
+            << " " << imuImagesPackage.second.measurement.image0.rows << std::endl;
+
+
+//            pub_depth.publish(out_msg0.toImageMsg());
 
 
             // Add into buffer
@@ -551,6 +559,7 @@ void vio_estimate() {
         if (estimator.isInitalized()) {
             bool isKeyframe = estimator.isKeyframe();
             std::vector<State> states = estimator.getCurrentStates();
+
             UpdateMeshInfo updateMeshInfo;
             updateMeshInfo.isKeyframe = isKeyframe;
             updateMeshInfo.vio_state = states;
@@ -566,14 +575,21 @@ void vio_estimate() {
 
 void estimate_depth_mesh() {
     uint64_t id = 0;
+    cv::Mat Kcv0, Dcv0;
+    cv::eigen2cv(K0, Kcv0);
+    cv::eigen2cv(distort0, Dcv0);
+
     for (;;) {
         UpdateMeshInfo updateMeshInfo;
         if (meshUpdateInfoThreadSafeQueue.PopBlocking(&updateMeshInfo) == false)
             return;
 
-        // todo
-        std::cout<< "get meshUpdate info "  << updateMeshInfo.vio_state.size()
-        << " " << updateMeshInfo.isKeyframe <<  std::endl;
+//        // todo
+//        std::cout<<"Pop updateMeshInfo:  " << updateMeshInfo.vio_state.front().Header.stamp.toSec()
+//                 << " " << updateMeshInfo.vio_state.back().Header.stamp.toSec() << std::endl;
+//
+//        std::cout<< "R \n" << updateMeshInfo.vio_state.back().R << std::endl;
+//        std::cout<< "P \n" << updateMeshInfo.vio_state.back().P.transpose() << std::endl;
 
         Eigen::Isometry3d eigen_T_WS = Eigen::Isometry3d::Identity();
         eigen_T_WS.linear() = updateMeshInfo.vio_state.back().R;
@@ -600,25 +616,19 @@ void estimate_depth_mesh() {
         okvis::Time time(updateMeshInfo.vio_state.back().Header.stamp.toSec());
         bool isKeyframe = updateMeshInfo.isKeyframe;
 
-//        mesh_estimator->processFrame(time, id++,
-//                                        T_WC0, updateMeshInfo.stereoCameraData.image0,
-//                                        T_WC1, updateMeshInfo.stereoCameraData.image1,
-//                                        isKeyframe);
-//
-//        const flame::Image3b depth_image =  mesh_estimator->getDebugImageWireframe();
-//
-//
-//        cv_bridge::CvImage out_msg;
-//        std_msgs::Header header;
-//        header.stamp = ros::Time::now();
-//        header.frame_id = "world";
-//        out_msg.header   = header; // Same timestamp and tf frame as input image
-//        out_msg.encoding = sensor_msgs::image_encodings::RGB8; // Or whatever
-//        out_msg.image    = depth_image; // Your cv::Mat
-//
-//
-//        pub_depth.publish(out_msg.toImageMsg());
+        //std::cout<< "id : " << id <<  std::endl << T_WC1.T3x4() << std::endl;
+        cv::Mat undistort0;
+        cv::undistort(updateMeshInfo.stereoCameraData.image0,undistort0, Kcv0, Dcv0);
 
+
+        mesh_estimator->processFrame(id++, time.toSec(), T_WC1,
+                                     undistort0, isKeyframe);
+
+//        inliner_mutex.lock();
+//        feature_tracking_avalible = true;
+//        inliner_view0_ft = undistort0_color;
+//        //inliner_view1_ft = voFeatureTrackingPipeline->inliner_view1;
+//        inliner_mutex.unlock();
 
     }
 }
@@ -654,7 +664,7 @@ int main(int argc, char **argv)
     voFeatureTrackingPipeline
         = std::make_shared<feature_tracking::VOFeatureTrackingPipeline>(camera_system);
 
-    mesh_estimator = std::make_shared<flame::DepthEstimate>(n, K0, imageWidth, imageHeight);
+    mesh_estimator = std::make_shared<flame::DepthEstimate>(n, K0.cast<float>(), imageWidth, imageHeight);
 
     // Initialize the pipeline.
     static constexpr bool kCopyImages = false;
@@ -862,18 +872,18 @@ int main(int argc, char **argv)
         ++counter;
 
 
-//        inliner_mutex.lock();
-//        bool availible = feature_tracking_avalible;
-//
-//        cv::Mat inliner_view0 = inliner_view0_ft;
-//        cv::Mat inliner_view1 = inliner_view1_ft;
-//        inliner_mutex.unlock();
-//
-//        if (availible) {
-//            cv::imshow("inliner 0", inliner_view0);
-//            //cv::imshow("inliner 1", inliner_view1);
-//            cv::waitKey(1);
-//        }
+        inliner_mutex.lock();
+        bool availible = feature_tracking_avalible;
+
+        cv::Mat inliner_view0 = inliner_view0_ft;
+        cv::Mat inliner_view1 = inliner_view1_ft;
+        inliner_mutex.unlock();
+
+        if (availible) {
+            cv::imshow("inliner 0", inliner_view0);
+            //cv::imshow("inliner 1", inliner_view1);
+            cv::waitKey(1);
+        }
 
 
         // display progress

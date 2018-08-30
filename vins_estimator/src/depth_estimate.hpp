@@ -76,8 +76,9 @@ namespace flame {
         DepthEstimate &operator=(DepthEstimate &&rhs) = delete;
 
         void processFrame(const uint32_t img_id, const double time,
-                          const okvis::kinematics::Transformation &pose, const cv::Mat3b &rgb,
-                          const cv::Mat1f &depth, bool asKeyframe);
+                          const okvis::kinematics::Transformation &pose,
+                          const cv::Mat1b &img_gray,
+                          bool asKeyframe);
 
     private:
         // Keeps track of stats and load.

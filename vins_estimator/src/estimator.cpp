@@ -214,6 +214,8 @@ std::vector<State> Estimator::getCurrentStates() {
         state.Ba = Bas[i];
         state.Bg = Bgs[i];
         state.Header = Headers[i];
+
+        states.push_back(state);
     }
 
     return states;

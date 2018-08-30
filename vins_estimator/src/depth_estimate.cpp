@@ -188,36 +188,21 @@ namespace flame {
     }
 
     void DepthEstimate::processFrame(const uint32_t img_id, const double time,
-                                     const okvis::kinematics::Transformation &pose, const cv::Mat3b &rgb,
-                                     const cv::Mat1f &depth, bool asKeyframe) {
+                                     const okvis::kinematics::Transformation &pose,
+                                     const cv::Mat1b &img_gray,
+                                     bool asKeyframe) {
         stats_.tick("process_frame");
 
+        Image3b  rgb;
+        cv::cvtColor(img_gray,rgb, CV_GRAY2BGR);
         /*==================== Process image ====================*/
-        // Convert to grayscale.
-        cv::Mat1b img_gray;
-        cv::cvtColor(rgb, img_gray, cv::COLOR_RGB2GRAY);
-
-        bool is_poseframe = (img_id % poseframe_subsample_factor_) == 0;
+        bool is_poseframe = asKeyframe;
         bool update_success = false;
-        if (!pass_in_truth_) {
-            update_success = sensor_->update(time, img_id, pose, img_gray,
-                                             is_poseframe);
-        } else {
-            // Convert true depth to idepth.
-            cv::Mat1f idepths_true(rgb.rows, rgb.cols, std::numeric_limits<float>::quiet_NaN());
-            for (int ii = 0; ii < depth.rows; ++ii) {
-                for (int jj = 0; jj < depth.cols; ++jj) {
-                    if (!std::isnan(depth(ii, jj)) && (depth(ii, jj) > 0)) {
-                        idepths_true(ii, jj) = 1.0f / depth(ii, jj);
-                    } else {
-                        idepths_true(ii, jj) = std::numeric_limits<float>::quiet_NaN();
-                    }
-                }
-            }
 
-            update_success = sensor_->update(time, img_id, pose, img_gray, is_poseframe,
-                                             idepths_true);
-        }
+        std::cout<< "debug 0  " << std::endl;
+        update_success = sensor_->update(time, img_id, pose, img_gray,
+                                         is_poseframe);
+        std::cout<< "debug 1  " << std::endl;
 
         if (!update_success) {
             stats_.tock("process_frame");
