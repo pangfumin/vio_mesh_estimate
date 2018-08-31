@@ -24,7 +24,7 @@
 
 #include <memory>
 #include <vector>
-
+#include <common/Time/Time.hpp>
 #include "depth_mesh/types.h"
 #include "depth_mesh/utils/triangulator.h"
 
@@ -45,9 +45,11 @@ struct Frame {
       img_pad(num_lvls), gradx_pad(num_lvls), grady_pad(num_lvls) {}
 
   // Create a frame pointer object from a pose and raw image.
-  static Frame::Ptr create(const okvis::kinematics::Transformation& pose, const cv::Mat1b& img,
+  static Frame::Ptr create(const okvis::Time time, const okvis::kinematics::Transformation& pose,
+          const cv::Mat1b& img,
                            int id, int num_levels, int border);
 
+  okvis::Time time;
   uint32_t id; // Image number/ID.
   okvis::kinematics::Transformation pose; // Pose of this image.
   ImagePyramidb img; // Image pyramid.

@@ -205,7 +205,7 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
 }
 
 std::vector<State> Estimator::getCurrentStates() {
-    std::vector<State> states(WINDOW_SIZE + 1);
+    std::vector<State> states;
     for (int i = 0; i < WINDOW_SIZE + 1; i ++) {
         State state;
         state.P = Ps[i];

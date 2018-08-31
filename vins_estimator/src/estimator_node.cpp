@@ -476,22 +476,6 @@ void track_featrues() {
             std::pair<okvis::ImuMeasurementDeque, StereoFeatures>
                     imuFeaturesPackage = std::make_pair(imuImagesPackage.first, stereoFeatures);
 
-
-//            cv_bridge::CvImage out_msg0;
-//            std_msgs::Header header0;
-//            header0.stamp = ros::Time::now();
-//            header0.frame_id = "world";
-//            out_msg0.header   = header; // Same timestamp and tf frame as input image
-//            out_msg0.encoding = sensor_msgs::image_encodings::RGB8; // Or whatever
-//            out_msg0.image    = imuImagesPackage.second.measurement.image0; // Your cv::Mat
-//
-            std::cout<< "image size0: " <<  imuImagesPackage.second.measurement.image0.cols
-            << " " << imuImagesPackage.second.measurement.image0.rows << std::endl;
-
-
-//            pub_depth.publish(out_msg0.toImageMsg());
-
-
             // Add into buffer
             imuFeaturesPackageThreadSafeQueue.PushNonBlockingDroppingIfFull(imuFeaturesPackage, 10);
 
@@ -616,12 +600,11 @@ void estimate_depth_mesh() {
         okvis::Time time(updateMeshInfo.vio_state.back().Header.stamp.toSec());
         bool isKeyframe = updateMeshInfo.isKeyframe;
 
-        //std::cout<< "id : " << id <<  std::endl << T_WC1.T3x4() << std::endl;
         cv::Mat undistort0;
         cv::undistort(updateMeshInfo.stereoCameraData.image0,undistort0, Kcv0, Dcv0);
 
 
-        mesh_estimator->processFrame(id++, time.toSec(), T_WC1,
+        mesh_estimator->processFrame(id++, time, T_WC1,
                                      undistort0, isKeyframe);
 
 //        inliner_mutex.lock();

@@ -30,7 +30,7 @@
 #include <image_transport/image_transport.h>
 
 #include <cv_bridge/cv_bridge.h>
-
+#include <common/Time/Time.hpp>
 
 #include <depth_mesh/flame.h>
 #include <depth_mesh/utils/image_utils.h>
@@ -75,7 +75,7 @@ namespace flame {
 
         DepthEstimate &operator=(DepthEstimate &&rhs) = delete;
 
-        void processFrame(const uint32_t img_id, const double time,
+        void processFrame(const uint32_t img_id, const okvis::Time time,
                           const okvis::kinematics::Transformation &pose,
                           const cv::Mat1b &img_gray,
                           bool asKeyframe);
@@ -116,7 +116,7 @@ namespace flame {
 
         // Stuff for checking angular rates.
         float max_angular_rate_;
-        double prev_time_;
+        okvis::Time prev_time_;
         okvis::kinematics::Transformation prev_pose_;
 
         // Depth sensor.

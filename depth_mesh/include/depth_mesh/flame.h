@@ -142,7 +142,7 @@ class Flame final {
    * @param[in] idepths_true True inverse depths (for debugging).
    * @return True if update successful. Outputs are only valid if returns True.
    */
-  bool update(double time, uint32_t img_id, const okvis::kinematics::Transformation& T_new,
+  bool update(const okvis::Time time, uint32_t img_id, const okvis::kinematics::Transformation& T_new,
               const Image1b& img_new, bool is_poseframe,
               const Image1f& idepths_true = Image1f());
 

@@ -11,7 +11,7 @@ namespace flame {
                       const Matrix3f& K, const Matrix3f& Kinv, const Vector4f& distort,
                       const Params& parameters = Params());
 
-        void processFrame(const double time,
+        void processFrame(const okvis::Time  time,
                           const okvis::kinematics::Transformation& T_WC,
                           const cv::Mat& img_gray, bool isKeyframe);
 

@@ -288,7 +288,7 @@ class FlameOffline final {
 
 
 
-  void processFrame(const uint32_t img_id, const double time,
+  void processFrame(const uint32_t img_id, const okvis::Time time,
                     const okvis::kinematics::Transformation& pose, const cv::Mat3b& rgb,
                     const cv::Mat1f& depth) {
     stats_.tick("process_frame");
@@ -332,7 +332,7 @@ class FlameOffline final {
       Eigen::Quaternionf q_delta = pose.hamilton_quaternion().cast<float>() *
           prev_pose_.hamilton_quaternion().inverse().cast<float>();
       float angle_delta = fu::fast_abs(Eigen::AngleAxisf(q_delta).angle());
-      float angle_rate = angle_delta / (time - prev_time_);
+      float angle_rate = angle_delta / (time.toSec() - prev_time_.toSec());
 
       prev_time_ = time;
       prev_pose_ = pose;
@@ -359,7 +359,7 @@ class FlameOffline final {
       std::vector<bool> tri_validity;
       sensor_->getInverseDepthMesh(&vtx, &idepths, &normals, &triangles,
                                    &tri_validity, &edges);
-      publishDepthMesh(mesh_pub_, camera_frame_id_, time, Kinv_, vtx,
+      publishDepthMesh(mesh_pub_, camera_frame_id_, time.toSec(), Kinv_, vtx,
                        idepths, normals, triangles, tri_validity, rgb);
     }
 
@@ -369,7 +369,7 @@ class FlameOffline final {
       sensor_->getFilteredInverseDepthMap(&idepthmap);
 
       if (publish_idepthmap_) {
-        publishDepthMap(idepth_pub_, camera_frame_id_, time, K_,
+        publishDepthMap(idepth_pub_, camera_frame_id_, time.toSec(), K_,
                         idepthmap);
       }
 
@@ -387,14 +387,14 @@ class FlameOffline final {
       }
 
       if (publish_depthmap_) {
-        publishDepthMap(depth_pub_, camera_frame_id_, time, K_,
+        publishDepthMap(depth_pub_, camera_frame_id_, time.toSec(), K_,
                         depth_est);
       }
 
       if (publish_cloud_) {
         float max_depth = (params_.do_idepth_triangle_filter) ?
             1.0f / params_.min_triangle_idepth : std::numeric_limits<float>::max();
-        publishPointCloud(cloud_pub_, camera_frame_id_, time, K_,
+        publishPointCloud(cloud_pub_, camera_frame_id_, time.toSec(), K_,
                           depth_est, 0.1f, max_depth);
       }
     }
@@ -424,13 +424,13 @@ class FlameOffline final {
         }
       }
 
-      publishDepthMap(features_pub_, camera_frame_id_, time, K_,
+      publishDepthMap(features_pub_, camera_frame_id_, time.toSec(), K_,
                       depth_raw);
     }
 
 
 
-    stats_.set("latency", (ros::Time::now().toSec() - time) * 1000);
+    stats_.set("latency", (ros::Time::now().toSec() - time.toSec()) * 1000);
     ROS_INFO_COND(!params_.debug_quiet,
                   "FlameNodelet/latency = %4.1fms\n",
                   stats_.stats("latency"));
@@ -444,7 +444,7 @@ class FlameOffline final {
     stats_.tick("debug_publishing");
 
     std_msgs::Header hdr;
-    hdr.stamp.fromSec(time);
+    hdr.stamp.fromSec(time.toSec());
     hdr.frame_id = camera_frame_id_;
 
     if (params_.debug_draw_wireframe) {
@@ -540,7 +540,7 @@ class FlameOffline final {
 
   // Stuff for checking angular rates.
   float max_angular_rate_;
-  double prev_time_;
+  okvis::Time prev_time_;
   okvis::kinematics::Transformation prev_pose_;
 
   // Depth sensor.
@@ -670,7 +670,8 @@ int main(int argc, char *argv[]) {
       okvis::kinematics::Transformation pose(eigen_pose.matrix());
 
 
-      node.processFrame(img_id, time, pose,
+      okvis::Time ts(time);
+      node.processFrame(img_id, ts, pose,
                    rgb, depth);
     }
 

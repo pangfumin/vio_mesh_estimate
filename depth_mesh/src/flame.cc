@@ -115,7 +115,7 @@ Flame::~Flame() {
   return;
 }
 
-bool Flame::update(double time, uint32_t img_id,
+bool Flame::update(okvis::Time time, uint32_t img_id,
                    const okvis::kinematics::Transformation& T_new,
                    const Image1b& img_new,
                    bool is_poseframe,
@@ -138,7 +138,7 @@ bool Flame::update(double time, uint32_t img_id,
 
   // Create frame from new image.
   int border = params_.fparams.win_size;
-  fnew_ = utils::Frame::create(T_new, img_new, img_id, 1, border);
+  fnew_ = utils::Frame::create(time, T_new, img_new, img_id, 1, border);
 
   // Remember to increment counter.
   num_imgs_++;

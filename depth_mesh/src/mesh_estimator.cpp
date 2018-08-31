@@ -24,7 +24,7 @@ namespace flame {
 
     }
 
-    void MeshEstimator::processFrame( const double time,
+    void MeshEstimator::processFrame( const okvis::Time time,
                       const okvis::kinematics::Transformation& T_WC,
                                       const cv::Mat& img_gray, bool isKeyframe) {
 //
