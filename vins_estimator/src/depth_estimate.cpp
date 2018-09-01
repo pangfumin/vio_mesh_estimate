@@ -187,6 +187,12 @@ namespace flame {
         return;
     }
 
+    int DepthEstimate::updateFramePoses(const std::vector<common::State> vio_states,
+                                        const okvis::kinematics::Transformation T_SC0) {
+        return sensor_->updateFrameState(vio_states, T_SC0);
+    }
+
+
     void DepthEstimate::processFrame(const uint32_t img_id, const okvis::Time time,
                                      const okvis::kinematics::Transformation &pose,
                                      const cv::Mat1b &img_gray,
@@ -199,10 +205,8 @@ namespace flame {
         bool is_poseframe = asKeyframe;
         bool update_success = false;
 
-        std::cout<< "debug 0  " << std::endl;
         update_success = sensor_->update(time, img_id, pose, img_gray,
                                          is_poseframe);
-        std::cout<< "debug 1  " << std::endl;
 
         if (!update_success) {
             stats_.tock("process_frame");

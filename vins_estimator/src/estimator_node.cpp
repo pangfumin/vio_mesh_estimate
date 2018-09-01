@@ -40,7 +40,7 @@ struct StereoFeatures {
 
 
 struct UpdateMeshInfo {
-    std::vector<State> vio_state;
+    std::vector<common::State> vio_state;
     bool isKeyframe;
     okvis::StereoCameraData stereoCameraData;
 };
@@ -542,7 +542,7 @@ void vio_estimate() {
 
         if (estimator.isInitalized()) {
             bool isKeyframe = estimator.isKeyframe();
-            std::vector<State> states = estimator.getCurrentStates();
+            std::vector<common::State> states = estimator.getCurrentStates();
 
             UpdateMeshInfo updateMeshInfo;
             updateMeshInfo.isKeyframe = isKeyframe;
@@ -575,6 +575,7 @@ void estimate_depth_mesh() {
 //        std::cout<< "R \n" << updateMeshInfo.vio_state.back().R << std::endl;
 //        std::cout<< "P \n" << updateMeshInfo.vio_state.back().P.transpose() << std::endl;
 
+        std::cout << " --------------------------------- " << std::endl;
         Eigen::Isometry3d eigen_T_WS = Eigen::Isometry3d::Identity();
         eigen_T_WS.linear() = updateMeshInfo.vio_state.back().R;
         eigen_T_WS.translation() = updateMeshInfo.vio_state.back().P;
@@ -597,15 +598,18 @@ void estimate_depth_mesh() {
 //        std::cout<<"T_BC1: " << std::endl << T_BC1.matrix();
 
 
-        okvis::Time time(updateMeshInfo.vio_state.back().Header.stamp.toSec());
+        okvis::Time time(updateMeshInfo.vio_state.back().time);
         bool isKeyframe = updateMeshInfo.isKeyframe;
 
+        std::cout << "time " << time << " " << isKeyframe << std::endl;
         cv::Mat undistort0;
         cv::undistort(updateMeshInfo.stereoCameraData.image0,undistort0, Kcv0, Dcv0);
 
-
         mesh_estimator->processFrame(id++, time, T_WC1,
                                      undistort0, isKeyframe);
+//        int remove_cnt = mesh_estimator->updateFramePoses(updateMeshInfo.vio_state,
+//                                                          okvis::kinematics::Transformation(T_BC0.matrix()));
+//        std::cout<< "remove: " << remove_cnt << std::endl;
 
 //        inliner_mutex.lock();
 //        feature_tracking_avalible = true;

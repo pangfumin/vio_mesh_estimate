@@ -146,7 +146,6 @@ bool Flame::update(okvis::Time time, uint32_t img_id,
   if (is_poseframe) {
     // Add to poseframes.
     pfs_[fnew_->id] = fnew_;
-
     curr_pf_ = fnew_;
   }
 
@@ -627,6 +626,57 @@ bool Flame::update(okvis::Time time, uint32_t img_id,
 //
 //  return;
 //}
+int Flame::updateFrameState(const std::vector<common::State> states,
+        const okvis::kinematics::Transformation T_SC0) {
+  int remove_cnt = 0;
+  for (auto frame_it = pfs_.cbegin(); frame_it != pfs_.cend();) {
+    okvis::Time ts = frame_it->second->time;
+    uint32_t frame_id = frame_it->first;
+    std::cout<< "frame ts: " << ts << std::endl;
+    auto it  = std::find_if (states.begin(), states.end(),
+            [ts](common::State state)->bool {
+      return state.time == ts;
+    }
+    );
+    if (it != states.end()) {
+      std::cout<< "find " << std::endl;
+      // udpate Pose
+      Eigen::Isometry3d eigen_T_WS = Eigen::Isometry3d::Identity();
+      eigen_T_WS.linear() = it->R;
+      eigen_T_WS.translation() =it->P;
+      okvis::kinematics::Transformation T_WS(eigen_T_WS.matrix());
+
+      okvis::kinematics::Transformation T_WC0 = T_WS*T_SC0;
+      frame_it->second->pose = T_WC0;
+
+      ++ frame_it;
+    } else {
+      std::cout<< "not find, remove " << frame_id<< std::endl;
+
+      // remove features
+      for (std::vector<FeatureWithIDepth>::iterator feat_it=feats_.begin();
+           feat_it!=feats_.end();)
+      {
+
+        if(feat_it->frame_id == frame_id) {
+          std::cout<< "remove " << feat_it->id << std::endl;
+          feat_it = feats_.erase(feat_it);
+        } else {
+          ++feat_it;
+        }
+
+      }
+
+      // remove frame
+      pfs_.erase(frame_it++);
+      remove_cnt++;
+    }
+  }
+
+  std::cout<< "update end" << std::endl;
+  return remove_cnt;
+
+}
 
 
 void Flame::detectFeatures(DetectionData& data) {
@@ -642,9 +692,7 @@ void Flame::detectFeatures(DetectionData& data) {
 
   // Add new features to list.
   for (int ii = 0; ii < new_feats.size(); ++ii) {
-    FeatureWithIDepth newf;
-    newf.id = feat_count_++;
-    newf.frame_id = data.ref.id;
+    FeatureWithIDepth newf(feat_count_++, data.ref.id);
     newf.xy = new_feats[ii];
     newf.idepth_var = params_.idepth_var_init;
     newf.valid = true;
@@ -1147,11 +1195,14 @@ bool Flame::updateFeatureIDepths(const Params& params,
   std::atomic<int> num_amb_match(0);
   std::atomic<int> num_max_cost(0);
 
+
 #pragma omp parallel for num_threads(params.omp_num_threads) schedule(static, params.omp_chunk_size) // NOLINT
   for (int ii = 0; ii < feats->size(); ++ii) {
     stereo::EpipolarGeometry<float> epigeo(K, Kinv);
 
     FeatureWithIDepth& fii = (*feats)[ii];
+    if (!pfs.count(fii.frame_id))
+        std::cout<< " is frame cont " << fii.frame_id << " " << fii.id  << std::endl;
 
     // Load geometry.
     okvis::kinematics::Transformation T_ref_to_new = fnew.pose.inverse() * pfs.at(fii.frame_id)->pose;
@@ -1431,75 +1482,75 @@ bool Flame::trackFeature(const Params& params,
   FLAME_ASSERT(!std::isnan(rescale_factor));
   FLAME_ASSERT(rescale_factor > 0);
 
-  if ((rescale_factor <= params.rescale_factor_min) ||
-      (rescale_factor >= params.rescale_factor_max)) {
-    // Warp on reference patch is too large - i.e. idepth difference between
-    // reference frame and comparison frame is too large. Move the feature to
-    // the most recent pf.
-    bool verbose = false;
-    if (verbose) {
-      fprintf(stderr, "Flame[FAIL]: bad rescale_factor = %f, prior_idepth = %f, idepth_cmp = %f\n",
-              rescale_factor, feat->idepth_mu, idepth_cmp);
-    }
-
-    if (verbose) {
-      fprintf(stderr, "Flame[WARNING]: Moving feature from u_ref = (%f, %f) idepth = %f to u_cmp = (%f, %f) idepth = %f\n",
-              feat->xy.x, feat->xy.y, feat->idepth_mu,
-              u_cmp.x, u_cmp.y, idepth_cmp);
-    }
-
-    // If this feature has converged already, move it so that it's parent
-    // pose is the most recent poseframe frame rather than throw it away.
-    stereo::EpipolarGeometry<float> epipf(K, Kinv);
-    okvis::kinematics::Transformation T_old_to_new = curr_pf.pose.inverse() * pfs.at(feat->frame_id)->pose;
-    epipf.loadGeometry(T_old_to_new.hamilton_quaternion().cast<float>(),
-                       T_old_to_new.r().cast<float>());
-
-    cv::Point2f u_pf;
-    float idepth_pf, var_pf;
-    bool move_success =
-        stereo::inverse_depth_filter::predict(epipf,
-                                              params.fparams.process_var_factor,
-                                              feat->xy,
-                                              feat->idepth_mu,
-                                              feat->idepth_var,
-                                              &u_pf, &idepth_pf, &var_pf);
-    if (!move_success || !valid_region.contains(u_pf)) {
-      feat->valid = false;
-      if (params.debug_draw_matches) {
-        // Failed move in brown.
-        cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
-        cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
-                      u_cmpi + debug_feature_offset, cv::Scalar(0, 51, 102), -1);
-      }
-      return false;
-    }
-
-    feat->frame_id = curr_pf.id;
-    feat->xy = u_pf;
-    float old_idepth = feat->idepth_mu;
-    feat->idepth_mu = idepth_pf;
-
-    // Project idepth variance.
-    float var_factor4 = idepth_pf / old_idepth;
-    var_factor4 *= var_factor4;
-    var_factor4 *= var_factor4;
-
-    if (idepth_pf < 1e-6) {
-      // If feat_ref.idepth_mu == 0, then var_factor4 is inf.
-      var_factor4 = 1;
-    }
-    feat->idepth_var *= var_factor4;
-
-    if (params.debug_draw_matches) {
-      // Successful move in magenta.
-      cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
-      cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
-                    u_cmpi + debug_feature_offset, cv::Scalar(255, 0, 255), -1);
-    }
-
-    return false;
-  }
+//  if ((rescale_factor <= params.rescale_factor_min) ||
+//      (rescale_factor >= params.rescale_factor_max)) {
+//    // Warp on reference patch is too large - i.e. idepth difference between
+//    // reference frame and comparison frame is too large. Move the feature to
+//    // the most recent pf.
+//    bool verbose = false;
+//    if (verbose) {
+//      fprintf(stderr, "Flame[FAIL]: bad rescale_factor = %f, prior_idepth = %f, idepth_cmp = %f\n",
+//              rescale_factor, feat->idepth_mu, idepth_cmp);
+//    }
+//
+//    if (verbose) {
+//      fprintf(stderr, "Flame[WARNING]: Moving feature from u_ref = (%f, %f) idepth = %f to u_cmp = (%f, %f) idepth = %f\n",
+//              feat->xy.x, feat->xy.y, feat->idepth_mu,
+//              u_cmp.x, u_cmp.y, idepth_cmp);
+//    }
+//
+//    // If this feature has converged already, move it so that it's parent
+//    // pose is the most recent poseframe frame rather than throw it away.
+//    stereo::EpipolarGeometry<float> epipf(K, Kinv);
+//    okvis::kinematics::Transformation T_old_to_new = curr_pf.pose.inverse() * pfs.at(feat->frame_id)->pose;
+//    epipf.loadGeometry(T_old_to_new.hamilton_quaternion().cast<float>(),
+//                       T_old_to_new.r().cast<float>());
+//
+//    cv::Point2f u_pf;
+//    float idepth_pf, var_pf;
+//    bool move_success =
+//        stereo::inverse_depth_filter::predict(epipf,
+//                                              params.fparams.process_var_factor,
+//                                              feat->xy,
+//                                              feat->idepth_mu,
+//                                              feat->idepth_var,
+//                                              &u_pf, &idepth_pf, &var_pf);
+//    if (!move_success || !valid_region.contains(u_pf)) {
+//      feat->valid = false;
+//      if (params.debug_draw_matches) {
+//        // Failed move in brown.
+//        cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
+//        cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
+//                      u_cmpi + debug_feature_offset, cv::Scalar(0, 51, 102), -1);
+//      }
+//      return false;
+//    }
+//
+//    feat->frame_id = curr_pf.id;
+//    feat->xy = u_pf;
+//    float old_idepth = feat->idepth_mu;
+//    feat->idepth_mu = idepth_pf;
+//
+//    // Project idepth variance.
+//    float var_factor4 = idepth_pf / old_idepth;
+//    var_factor4 *= var_factor4;
+//    var_factor4 *= var_factor4;
+//
+//    if (idepth_pf < 1e-6) {
+//      // If feat_ref.idepth_mu == 0, then var_factor4 is inf.
+//      var_factor4 = 1;
+//    }
+//    feat->idepth_var *= var_factor4;
+//
+//    if (params.debug_draw_matches) {
+//      // Successful move in magenta.
+//      cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
+//      cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
+//                    u_cmpi + debug_feature_offset, cv::Scalar(255, 0, 255), -1);
+//    }
+//
+//    return false;
+//  }
 
   cv::Point2f u_start, u_end, epi;
   bool region_success =

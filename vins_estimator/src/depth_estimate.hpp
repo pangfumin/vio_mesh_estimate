@@ -37,14 +37,10 @@
 #include <depth_mesh/utils/stats_tracker.h>
 #include <depth_mesh/utils/load_tracker.h>
 
-
 #include "ros_utils.h"
-
 
 namespace bfs = boost::filesystem;
 namespace fu = flame::utils;
-
-
 
 namespace flame {
 /**
@@ -75,6 +71,8 @@ namespace flame {
 
         DepthEstimate &operator=(DepthEstimate &&rhs) = delete;
 
+        int updateFramePoses(const std::vector<common::State> vio_states,
+                             const okvis::kinematics::Transformation T_SC0);
         void processFrame(const uint32_t img_id, const okvis::Time time,
                           const okvis::kinematics::Transformation &pose,
                           const cv::Mat1b &img_gray,

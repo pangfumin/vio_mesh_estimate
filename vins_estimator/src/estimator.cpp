@@ -204,16 +204,16 @@ void Estimator::processImage(const map<int, vector<pair<int, Vector3d>>> &image,
     }
 }
 
-std::vector<State> Estimator::getCurrentStates() {
-    std::vector<State> states;
+std::vector<common::State> Estimator::getCurrentStates() {
+    std::vector<common::State> states;
     for (int i = 0; i < WINDOW_SIZE + 1; i ++) {
-        State state;
+        common::State state;
         state.P = Ps[i];
         state.V = Vs[i];
         state.R = Rs[i];
         state.Ba = Bas[i];
         state.Bg = Bgs[i];
-        state.Header = Headers[i];
+        state.time = okvis::Time(Headers[i].stamp.toSec());
 
         states.push_back(state);
     }

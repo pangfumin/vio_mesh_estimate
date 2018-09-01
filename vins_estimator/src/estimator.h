@@ -21,15 +21,8 @@
 #include <queue>
 #include <opencv2/core/eigen.hpp>
 
-struct State {
-    Vector3d P;
-    Vector3d V;
-    Matrix3d R;
-    Vector3d Ba;
-    Vector3d Bg;
-    std_msgs::Header Header;
+#include <common/types.h>
 
-};
 
 class Estimator
 {
@@ -45,7 +38,7 @@ class Estimator
     bool isInitalized() {return  solver_flag == NON_LINEAR;}
     bool isKeyframe() {return marginalization_flag == MARGIN_OLD;}
 
-    std::vector<State> getCurrentStates();
+    std::vector<common::State> getCurrentStates();
 
     // internal
     void clearState();

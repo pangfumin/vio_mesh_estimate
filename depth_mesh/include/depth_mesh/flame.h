@@ -34,6 +34,8 @@
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/features2d/features2d.hpp>
+#include <common/types.h>
+
 
 #include "depth_mesh/types.h"
 #include "depth_mesh/params.h"
@@ -86,7 +88,7 @@ struct DetectionData {
  * @brief Struct to hold feature data.
  */
 struct FeatureWithIDepth {
-  uint32_t id = 0;
+  uint32_t id = 0 ;
   uint32_t frame_id = 0;
   Point2f xy;
   float idepth_mu = 0.0f;
@@ -157,6 +159,10 @@ class Flame final {
    * @param[in] pfs_to_keep IDs of the poseframes to keep.
    */
   void prunePoseFrames(const std::vector<uint32_t>& pfs_to_keep);
+
+
+  int updateFrameState(const std::vector<common::State> states,
+                       const okvis::kinematics::Transformation T_SC0);
 
   /**
    * @brief Clear everything.
