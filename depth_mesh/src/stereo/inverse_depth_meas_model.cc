@@ -44,7 +44,7 @@ InverseDepthMeasModel::InverseDepthMeasModel(const Eigen::Matrix3f& K,
     gradx_cmp_(),
     grady_cmp_(),
     T_ref_to_cmp_(),
-    epigeo_(K, Kinv) {}
+    epigeo_(K, Kinv, K, Kinv) {}
 
 bool InverseDepthMeasModel::idepth(const cv::Point2f& u_ref,
                                    const cv::Point2f& u_cmp,

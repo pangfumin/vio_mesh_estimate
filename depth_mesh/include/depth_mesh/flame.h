@@ -123,7 +123,10 @@ class Flame final {
    * @param[in] params Parameter struct.
    */
   Flame(int width, int height,
-        const Matrix3f& K, const Matrix3f& Kinv,
+        const Matrix3f& K0,
+        const Matrix3f& K0inv,
+        const Matrix3f& K1,
+        const Matrix3f& K1inv,
         const Params& params = Params());
   ~Flame();
 
@@ -478,8 +481,11 @@ class Flame final {
   int width_;
   int height_;
 
-  Matrix3f K_;
-  Matrix3f Kinv_;
+  Matrix3f K0_;
+  Matrix3f K0inv_;
+
+  Matrix3f K1_;
+  Matrix3f K1inv_;
 
   stereo::EpipolarGeometry<float> epigeo_;
 

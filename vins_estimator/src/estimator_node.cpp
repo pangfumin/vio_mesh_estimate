@@ -22,7 +22,6 @@
 #include <aslam/pipeline/visual-pipeline-null.h>
 #include <feature-tracking/vo-feature-tracking-pipeline.h>
 
-#include <depth_mesh/mesh_estimator.hpp>
 #include <depth_mesh/params.h>
 
 #include "depth_estimate.hpp"

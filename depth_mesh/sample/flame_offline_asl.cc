@@ -234,6 +234,8 @@ class FlameOffline final {
                                              height,
                                              K,
                                              Kinv_,
+                                             K,
+                                             Kinv_,
                                              params_);
 
 

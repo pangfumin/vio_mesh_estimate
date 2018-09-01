@@ -140,10 +140,9 @@ namespace flame {
 
         // Initialize depth sensor.
         ROS_INFO_COND(!params_.debug_quiet, "Constructing Flame...\n");
-        sensor_ = std::make_shared<flame::Flame>(width,
-                                                 height,
-                                                 K,
-                                                 Kinv_,
+        sensor_ = std::make_shared<flame::Flame>(width, height,
+                                                 K, Kinv_,
+                                                 K, Kinv_,
                                                  params_);
 
 
