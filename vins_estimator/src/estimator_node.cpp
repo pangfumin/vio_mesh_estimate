@@ -78,14 +78,17 @@ cv::Mat inliner_view1_ft;
 ///< Mesh estimate
 Eigen::Matrix3d K0, K1;
 Eigen::Vector4d distort0, distort1;
+cv::Mat Kcv0, Dcv0;
+cv::Mat Kcv1, Dcv1;
+cv::Mat undistort0_map1, undistort0_map2;
+cv::Mat undistort1_map1, undistort1_map2;
+
+
 int imageWidth, imageHeight;
 
 flame::Params mesh_est_param;
 std::shared_ptr<flame::DepthEstimate> mesh_estimator;
 okvis::threadsafe::ThreadSafeQueue<UpdateMeshInfo> meshUpdateInfoThreadSafeQueue;
-
-
-
 
 std::condition_variable con;
 double current_time = -1;
@@ -229,6 +232,13 @@ std::shared_ptr<aslam::NCamera> loadCameraInfoFromConfigFile(
     K0(0,0) = fx; K0(1,1) = fy; K0(0,2) = cx; K0(1,2) = cy;
     distort0 << k1,k2,p1,p2;
 
+    cv::eigen2cv(K0, Kcv0);
+    cv::eigen2cv(distort0, Dcv0);
+    cv::initUndistortRectifyMap(Kcv0, Dcv0, cv::Mat(), Kcv0,
+                                cv::Size(imageWidth, imageHeight), CV_32FC1,
+                                undistort0_map1, undistort0_map2);
+
+
 
     Eigen::Matrix3d eigen_R;
     Eigen::Vector3d eigen_T;
@@ -248,6 +258,7 @@ std::shared_ptr<aslam::NCamera> loadCameraInfoFromConfigFile(
     Eigen::VectorXd cameraIntrinsic(4);
     cameraIntrinsic << fx, fy, cx, cy;
     std::cout<<"cameraIntrinsic: "<<cameraIntrinsic<<std::endl;
+
 
     aslam::Camera::Ptr camera = std::shared_ptr<aslam::PinholeCamera>(
             new aslam::PinholeCamera(
@@ -286,6 +297,12 @@ std::shared_ptr<aslam::NCamera> loadCameraInfoFromConfigFile(
     K1 = Eigen::Matrix3d::Identity();
     K1(0,0) = fx; K1(1,1) = fy; K1(0,2) = cx; K1(1,2) = cy;
     distort1 << k1,k2,p1,p2;
+
+    cv::eigen2cv(K1, Kcv1);
+    cv::eigen2cv(distort1, Dcv1);
+    cv::initUndistortRectifyMap(Kcv1, Dcv1, cv::Mat(), Kcv1,
+                                cv::Size(imageWidth, imageHeight), CV_32FC1,
+                                undistort1_map1, undistort1_map2);
 
 
     Eigen::Matrix3d eigen_R1;
@@ -559,9 +576,7 @@ void vio_estimate() {
 
 void estimate_depth_mesh() {
     uint64_t id = 0;
-    cv::Mat Kcv0, Dcv0;
-    cv::eigen2cv(K0, Kcv0);
-    cv::eigen2cv(distort0, Dcv0);
+
 
     for (;;) {
         UpdateMeshInfo updateMeshInfo;
@@ -602,7 +617,10 @@ void estimate_depth_mesh() {
         bool isKeyframe = updateMeshInfo.isKeyframe;
 
         cv::Mat undistort0;
-        cv::undistort(updateMeshInfo.stereoCameraData.image0,undistort0, Kcv0, Dcv0);
+        cv::remap(updateMeshInfo.stereoCameraData.image0, undistort0, undistort0_map1,
+                undistort0_map2, cv::INTER_LINEAR);
+
+
         mesh_estimator->processFrame(id++, time, T_WC1,
                                      undistort0, isKeyframe);
         int remove_cnt = mesh_estimator->updateFramePoses(updateMeshInfo.vio_state,
