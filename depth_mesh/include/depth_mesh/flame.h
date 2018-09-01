@@ -339,8 +339,6 @@ class Flame final {
 
   // Track a single feature in the new image.
   static bool trackFeature(const Params& params,
-                           const Matrix3f& K,
-                           const Matrix3f& Kinv,
                            const FrameIDToFrame& pfs,
                            const stereo::EpipolarGeometry<float>& epigeo,
                            const utils::Frame& fnew,

@@ -54,3 +54,5 @@ src/utilities/common_lcmtypes/src
 
 **/cmake-build-debug
 **/.idea
+
+vins_estimator/config/euroc/vins_result\.csv

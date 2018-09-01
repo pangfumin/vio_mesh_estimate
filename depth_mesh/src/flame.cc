@@ -1228,7 +1228,8 @@ bool Flame::updateFeatureIDepths(const Params& params,
     /*==================== Track feature in new image ====================*/
     cv::Point2f flow;
     float residual;
-    bool track_success = trackFeature(params, K0, K0inv, pfs, epigeo, fnew,
+    bool track_success = trackFeature(params,
+                                       pfs, epigeo, fnew,
                                       curr_pf, &fii, &flow, &residual,
                                       debug_img);
 
@@ -1436,8 +1437,6 @@ bool Flame::updateFeatureIDepths(const Params& params,
 }
 
 bool Flame::trackFeature(const Params& params,
-                         const Matrix3f& K,
-                         const Matrix3f& Kinv,
                          const FrameIDToFrame& pfs,
                          const stereo::EpipolarGeometry<float>& epigeo,
                          const utils::Frame& fnew,
