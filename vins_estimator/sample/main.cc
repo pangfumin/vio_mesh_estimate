@@ -133,7 +133,7 @@ int main(int argc, char *argv[]) {
                                 world_frame);;
 
    int num_imgs = 0;
-  flame::DepthEstimate node(pnh, input->K(), input->width(), input->height());
+  flame::DepthEstimate node(pnh, input->K(), input->K(),  input->width(), input->height());
   /*==================== Enter main loop ====================*/
   ros::Rate ros_rate(30);
 
@@ -159,11 +159,9 @@ int main(int argc, char *argv[]) {
   cv::Mat img_gray;
   cv::cvtColor(img_gray, rgb, CV_GRAY2BGR);
   node.processFrame(img_id, okvis::Time(time), pose,
-               rgb, isKeyframe);
+               rgb, rgb, isKeyframe);
 
 
-    // Compute maximum fps based on runtime.
-    double fps_max = 0.0f;
 
     ros::spinOnce();
     ros_rate.sleep();

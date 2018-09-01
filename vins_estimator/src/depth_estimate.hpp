@@ -59,7 +59,9 @@ namespace flame {
         /**
          * @brief Constructor.
          */
-        DepthEstimate(ros::NodeHandle &pnh, Eigen::Matrix3f K, int width, int height);
+        DepthEstimate(ros::NodeHandle &pnh,
+                Eigen::Matrix3f K0, Eigen::Matrix3f K1,
+                int width, int height);
 
         ~DepthEstimate() = default;
 
@@ -75,7 +77,7 @@ namespace flame {
                              const okvis::kinematics::Transformation T_SC0);
         void processFrame(const uint32_t img_id, const okvis::Time time,
                           const okvis::kinematics::Transformation &pose,
-                          const cv::Mat1b &img_gray,
+                          const cv::Mat1b &img_gray0, const cv::Mat1b &img_gray1,
                           bool asKeyframe);
 
     private:
@@ -108,9 +110,11 @@ namespace flame {
 
         // Input stream object.
 
-        Eigen::Matrix3f K_;
         int width_, height_;
-        Eigen::Matrix3f Kinv_;
+        Eigen::Matrix3f K0_;
+        Eigen::Matrix3f K0inv_;
+        Eigen::Matrix3f K1_;
+        Eigen::Matrix3f K1inv_;
 
         // Stuff for checking angular rates.
         float max_angular_rate_;
