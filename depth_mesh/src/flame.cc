@@ -632,34 +632,32 @@ int Flame::updateFrameState(const std::vector<common::State> states,
   for (auto frame_it = pfs_.cbegin(); frame_it != pfs_.cend();) {
     okvis::Time ts = frame_it->second->time;
     uint32_t frame_id = frame_it->first;
-    std::cout<< "frame ts: " << ts << std::endl;
-    auto it  = std::find_if (states.begin(), states.end(),
-            [ts](common::State state)->bool {
-      return state.time == ts;
-    }
-    );
-    if (it != states.end()) {
-      std::cout<< "find " << std::endl;
-      // udpate Pose
-      Eigen::Isometry3d eigen_T_WS = Eigen::Isometry3d::Identity();
-      eigen_T_WS.linear() = it->R;
-      eigen_T_WS.translation() =it->P;
-      okvis::kinematics::Transformation T_WS(eigen_T_WS.matrix());
 
-      okvis::kinematics::Transformation T_WC0 = T_WS*T_SC0;
-      frame_it->second->pose = T_WC0;
+    // todo(pang)
+//    auto it  = std::find_if (states.begin(), states.end(),
+//            [ts](common::State state)->bool {
+//      return state.time == ts;
+//    }
+//    );
+    if (frame_it->second->time >= states.front().time) {
+//      std::cout<< "find " << std::endl;
+//      // udpate Pose
+//      Eigen::Isometry3d eigen_T_WS = Eigen::Isometry3d::Identity();
+//      eigen_T_WS.linear() = it->R;
+//      eigen_T_WS.translation() =it->P;
+//      okvis::kinematics::Transformation T_WS(eigen_T_WS.matrix());
+//
+//      okvis::kinematics::Transformation T_WC0 = T_WS*T_SC0;
+//      frame_it->second->pose = T_WC0;
 
       ++ frame_it;
     } else {
-      std::cout<< "not find, remove " << frame_id<< std::endl;
-
       // remove features
       for (std::vector<FeatureWithIDepth>::iterator feat_it=feats_.begin();
            feat_it!=feats_.end();)
       {
 
         if(feat_it->frame_id == frame_id) {
-          std::cout<< "remove " << feat_it->id << std::endl;
           feat_it = feats_.erase(feat_it);
         } else {
           ++feat_it;
@@ -673,7 +671,6 @@ int Flame::updateFrameState(const std::vector<common::State> states,
     }
   }
 
-  std::cout<< "update end" << std::endl;
   return remove_cnt;
 
 }
@@ -692,7 +689,9 @@ void Flame::detectFeatures(DetectionData& data) {
 
   // Add new features to list.
   for (int ii = 0; ii < new_feats.size(); ++ii) {
-    FeatureWithIDepth newf(feat_count_++, data.ref.id);
+    FeatureWithIDepth newf;
+    newf.id = feat_count_++;
+    newf.frame_id = data.ref.id;
     newf.xy = new_feats[ii];
     newf.idepth_var = params_.idepth_var_init;
     newf.valid = true;

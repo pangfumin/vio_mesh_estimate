@@ -601,15 +601,12 @@ void estimate_depth_mesh() {
         okvis::Time time(updateMeshInfo.vio_state.back().time);
         bool isKeyframe = updateMeshInfo.isKeyframe;
 
-        std::cout << "time " << time << " " << isKeyframe << std::endl;
         cv::Mat undistort0;
         cv::undistort(updateMeshInfo.stereoCameraData.image0,undistort0, Kcv0, Dcv0);
-
         mesh_estimator->processFrame(id++, time, T_WC1,
                                      undistort0, isKeyframe);
-//        int remove_cnt = mesh_estimator->updateFramePoses(updateMeshInfo.vio_state,
-//                                                          okvis::kinematics::Transformation(T_BC0.matrix()));
-//        std::cout<< "remove: " << remove_cnt << std::endl;
+        int remove_cnt = mesh_estimator->updateFramePoses(updateMeshInfo.vio_state,
+                                                          okvis::kinematics::Transformation(T_BC0.matrix()));
 
 //        inliner_mutex.lock();
 //        feature_tracking_avalible = true;
