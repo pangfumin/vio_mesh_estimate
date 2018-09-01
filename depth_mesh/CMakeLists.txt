@@ -37,21 +37,21 @@ set(FLAME_SRCS
 
 cs_add_library(depth_mesh  ${FLAME_SRCS})
 
-
-include_directories(sample)
-cs_add_executable(flame_offline_asl
-        sample/flame_offline_asl.cc
-        sample/utils.h
-        sample/utils.cc
-        sample/ros_sensor_streams/asl_rgbd_offline_stream.h
-        sample/ros_sensor_streams/asl_rgbd_offline_stream.cc
-        sample/dataset_utils/asl/dataset.h
-        sample/dataset_utils/asl/types.h
-        sample/dataset_utils/utils.h
-        sample/dataset_utils/utils.cc)
-
-target_link_libraries(flame_offline_asl
-        depth_mesh)
+#
+#include_directories(sample)
+#cs_add_executable(flame_offline_asl
+#        sample/flame_offline_asl.cc
+#        sample/utils.h
+#        sample/utils.cc
+#        sample/ros_sensor_streams/asl_rgbd_offline_stream.h
+#        sample/ros_sensor_streams/asl_rgbd_offline_stream.cc
+#        sample/dataset_utils/asl/dataset.h
+#        sample/dataset_utils/asl/types.h
+#        sample/dataset_utils/utils.h
+#        sample/dataset_utils/utils.cc)
+#
+#target_link_libraries(flame_offline_asl
+#        depth_mesh)
 
 cs_install()
 cs_export()

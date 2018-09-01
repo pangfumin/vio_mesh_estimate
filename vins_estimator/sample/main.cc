@@ -159,7 +159,7 @@ int main(int argc, char *argv[]) {
   cv::Mat img_gray;
   cv::cvtColor(img_gray, rgb, CV_GRAY2BGR);
   node.processFrame(img_id, okvis::Time(time), pose,
-               rgb, rgb, isKeyframe);
+               rgb, pose, rgb, isKeyframe);
 
 
 

@@ -76,8 +76,10 @@ namespace flame {
         int updateFramePoses(const std::vector<common::State> vio_states,
                              const okvis::kinematics::Transformation T_SC0);
         void processFrame(const uint32_t img_id, const okvis::Time time,
-                          const okvis::kinematics::Transformation &pose,
-                          const cv::Mat1b &img_gray0, const cv::Mat1b &img_gray1,
+                          const okvis::kinematics::Transformation &pose0,
+                          const cv::Mat1b &img_gray0,
+                          const okvis::kinematics::Transformation &pose1,
+                          const cv::Mat1b &img_gray1,
                           bool asKeyframe);
 
     private:

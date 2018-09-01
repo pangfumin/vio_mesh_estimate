@@ -120,8 +120,10 @@ Flame::~Flame() {
 }
 
 bool Flame::update(okvis::Time time, uint32_t img_id,
-                   const okvis::kinematics::Transformation& T_new,
-                   const Image1b& img_new,
+                   const okvis::kinematics::Transformation& T_new0,
+                   const Image1b& img_new0,
+                   const okvis::kinematics::Transformation& T_new1,
+                   const Image1b& img_new1,
                    bool is_poseframe,
                    const Image1f& idepths_true) {
   stats_.tick("update");
@@ -142,7 +144,8 @@ bool Flame::update(okvis::Time time, uint32_t img_id,
 
   // Create frame from new image.
   int border = params_.fparams.win_size;
-  fnew_ = utils::Frame::create(time, T_new, img_new, img_id, 1, border);
+  fnew_ = utils::Frame::create(time, T_new0, img_new0, img_id, 1, border);
+  fnew_right_ = utils::Frame::create(time, T_new1, img_new1, img_id, 1, border);
 
   // Remember to increment counter.
   num_imgs_++;
@@ -213,7 +216,8 @@ bool Flame::update(okvis::Time time, uint32_t img_id,
 
   /*==================== Update features ====================*/
   // Update depth estimates.
-  bool idepth_success = updateFeatureIDepths(params_, K0_, K0inv_, pfs_, *fnew_,
+  bool idepth_success = updateFeatureIDepths(params_, K0_, K0inv_,
+          K1_, K1inv_, pfs_, *fnew_, *fnew_right_,
                                              *curr_pf_, &feats_, &stats_,
                                              &debug_img_matches_);
 
@@ -1172,10 +1176,13 @@ void Flame::detectFeatures(const Params& params,
 }
 
 bool Flame::updateFeatureIDepths(const Params& params,
-                                 const Matrix3f& K,
-                                 const Matrix3f& Kinv,
+                                 const Matrix3f& K0,
+                                 const Matrix3f& K0inv,
+                                 const Matrix3f& K1,
+                                 const Matrix3f& K1inv,
                                  const FrameIDToFrame& pfs,
                                  const utils::Frame& fnew,
+                                 const utils::Frame& fnew_right,
                                  const utils::Frame& curr_pf,
                                  std::vector<FeatureWithIDepth>* feats,
                                  utils::StatsTracker* stats,
@@ -1201,11 +1208,9 @@ bool Flame::updateFeatureIDepths(const Params& params,
 
 #pragma omp parallel for num_threads(params.omp_num_threads) schedule(static, params.omp_chunk_size) // NOLINT
   for (int ii = 0; ii < feats->size(); ++ii) {
-    stereo::EpipolarGeometry<float> epigeo(K, Kinv, K, Kinv);
+    stereo::EpipolarGeometry<float> epigeo(K0, K0inv, K0, K0inv);
 
     FeatureWithIDepth& fii = (*feats)[ii];
-    if (!pfs.count(fii.frame_id))
-        std::cout<< " is frame cont " << fii.frame_id << " " << fii.id  << std::endl;
 
     // Load geometry.
     okvis::kinematics::Transformation T_ref_to_new = fnew.pose.inverse() * pfs.at(fii.frame_id)->pose;
@@ -1223,7 +1228,7 @@ bool Flame::updateFeatureIDepths(const Params& params,
     /*==================== Track feature in new image ====================*/
     cv::Point2f flow;
     float residual;
-    bool track_success = trackFeature(params, K, Kinv, pfs, epigeo, fnew,
+    bool track_success = trackFeature(params, K0, K0inv, pfs, epigeo, fnew,
                                       curr_pf, &fii, &flow, &residual,
                                       debug_img);
 
@@ -1274,7 +1279,7 @@ bool Flame::updateFeatureIDepths(const Params& params,
 
     /*==================== Update idepth ====================*/
     // Load stuff into meas model.
-    stereo::InverseDepthMeasModel model(K, Kinv, params.zparams);
+    stereo::InverseDepthMeasModel model(K0, K0inv, K0, K0inv, params.zparams);
     auto& pfii = pfs.at(fii.frame_id);
     model.loadGeometry(pfii->pose, fnew.pose);
     model.loadPaddedImages(pfii->img_pad[0], fnew.img_pad[0],

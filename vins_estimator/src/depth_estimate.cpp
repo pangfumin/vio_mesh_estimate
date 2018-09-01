@@ -198,8 +198,10 @@ namespace flame {
 
 
     void DepthEstimate::processFrame(const uint32_t img_id, const okvis::Time time,
-                                     const okvis::kinematics::Transformation &pose,
-                                     const cv::Mat1b &img_gray0, const cv::Mat1b &img_gray1,
+                                     const okvis::kinematics::Transformation &pose0,
+                                     const cv::Mat1b &img_gray0,
+                                     const okvis::kinematics::Transformation &pose1,
+                                     const cv::Mat1b &img_gray1,
                                      bool asKeyframe) {
         stats_.tick("process_frame");
 
@@ -209,7 +211,9 @@ namespace flame {
         bool is_poseframe = asKeyframe;
         bool update_success = false;
 
-        update_success = sensor_->update(time, img_id, pose, img_gray0,
+        update_success = sensor_->update(time, img_id,
+                pose0, img_gray0,
+                                         pose1, img_gray1,
                                          is_poseframe);
 
         if (!update_success) {
@@ -221,13 +225,13 @@ namespace flame {
         if (max_angular_rate_ > 0.0f) {
             // Check angle difference between last and current pose. If we're rotating,
             // we shouldn't publish output since it's probably too noisy.
-            Eigen::Quaternionf q_delta = pose.hamilton_quaternion().cast<float>() *
+            Eigen::Quaternionf q_delta = pose0.hamilton_quaternion().cast<float>() *
                                          prev_pose_.hamilton_quaternion().inverse().cast<float>();
             float angle_delta = fu::fast_abs(Eigen::AngleAxisf(q_delta).angle());
             float angle_rate = angle_delta / (time.toSec() - prev_time_.toSec());
 
             prev_time_ = time;
-            prev_pose_ = pose;
+            prev_pose_ = pose0;
 
             if (angle_rate * 180.0f / M_PI > max_angular_rate_) {
                 // Angular rate is too high.
