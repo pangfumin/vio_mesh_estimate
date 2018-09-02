@@ -57,7 +57,6 @@ Flame::Flame(int width, int height,
     K0inv_(K0inv),
     K1_(K1),
     K1inv_(K1inv),
-    epigeo_(K0, K0inv, K0, K0inv),
     num_imgs_(0),
     fnew_(nullptr),
     fprev_(nullptr),
@@ -247,12 +246,13 @@ bool Flame::update(okvis::Time time, uint32_t img_id,
   }
 
   /*==================== Get current smoothed solution  ====================*/
-  epigeo_.loadGeometry(T_prev_to_new.hamilton_quaternion().cast<float>(),
+  stereo::EpipolarGeometry<float> epigeo(K0_, K0inv_, K0_, K0inv_);
+  epigeo.loadGeometry(T_prev_to_new.hamilton_quaternion().cast<float>(),
                        T_prev_to_new.r().cast<float>());
 
   // Project graph into new frame.
   graph_mtx_.lock();
-  projectGraph(params_, epigeo_, *fnew_, &graph_, graph_scale_,
+  projectGraph(params_, epigeo, *fnew_, &graph_, graph_scale_,
                &feat_to_vtx_, &vtx_to_feat_, &stats_);
   graph_mtx_.unlock();
 
@@ -1479,132 +1479,132 @@ bool Flame::updateFeatureIDepths(const Params& params,
         update_right_success = false;
       }
 
-      // Load stuff into meas model.
-      float right_mu_meas, right_var_meas;
-      if (update_right_success) {
-        stereo::InverseDepthMeasModel model(K0, K0inv, K1, K1inv, params.zparams);
-        auto &pfii = pfs.at(fii.frame_id);
-        model.loadGeometry(pfii->pose, fnew_right.pose);
-        model.loadPaddedImages(pfii->img_pad[0], fnew_right.img_pad[0],
-                               pfii->gradx_pad[0],
-                               pfii->grady_pad[0],
-                               fnew_right.gradx_pad[0], fnew_right.grady_pad[0]);
-
-        // Generate measurement.
-
-        bool sense_success = model.idepth(fii.xy, right_flow, &right_mu_meas, &right_var_meas);
-
-        if (!sense_success) {
-          if (!params.debug_quiet && params.debug_print_verbose_errors) {
-            fprintf(stderr, "FAIL:Sense: u_ref = (%f, %f), id = %f, var = %f\n",
-                    fii.xy.x, fii.xy.y, fii.idepth_mu, fii.idepth_var);
-          }
-
-          cv::Scalar color;
-          fii.idepth_var *= params.fparams.process_fail_var_factor;
-          if (fii.idepth_var > params.idepth_var_max) {
-            fii.valid = false;
-            ++num_fail_max_var;
-
-
-            if (params.debug_draw_matches) {
-              cv::Scalar color(0, 255, 0); // Green for max var.
-              float blah;
-              cv::Point2f fii_cmp;
-              epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-              cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-                         debug_feature_radius, color);
-            }
-          }
-
-          fii.num_dropouts++;
-          if (fii.num_dropouts > params.max_dropouts) {
-            fii.valid = false;
-            ++num_fail_max_dropouts;
-
-            if (params.debug_draw_matches) {
-              cv::Scalar color(255, 0, 0); // Blue for max dropouts.
-              float blah;
-              cv::Point2f fii_cmp;
-              epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-              cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-                         debug_feature_radius, color);
-            }
-          }
-
-          update_right_success = false;
-        }
-      }
-
-
-        // Fuse.
-        float right_mu_post, right_var_post;
-        if (update_right_success) {
-
-          bool fuse_success =
-                  stereo::inverse_depth_filter::update(fii.idepth_mu,
-                                                       fii.idepth_var,
-                                                       right_mu_meas, right_var_meas,
-                                                       &right_mu_post, &right_var_post,
-                                                       params.outlier_sigma_thresh);
-
-          if (!fuse_success) {
-            if (!params.debug_quiet && params.debug_print_verbose_errors) {
-              fprintf(stderr, "FAIL:Fuse: mu_meas = %f, var_meas = %f\n",
-                      right_mu_meas, right_var_meas);
-            }
-
-            cv::Scalar color;
-            fii.idepth_var *= params.fparams.process_fail_var_factor;
-            if (fii.idepth_var > params.idepth_var_max) {
-              fii.valid = false;
-              ++num_fail_max_var;
-
-              if (params.debug_draw_matches) {
-                cv::Scalar color(0, 255, 0); // Green for max var.
-                float blah;
-                cv::Point2f fii_cmp;
-                epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-                cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-                           debug_feature_radius, color);
-              }
-            }
-
-            fii.num_dropouts++;
-            if (fii.num_dropouts > params.max_dropouts) {
-              fii.valid = false;
-              ++num_fail_max_dropouts;
-
-              if (params.debug_draw_matches) {
-                cv::Scalar color(255, 0, 0); // Blue for max dropouts.
-                float blah;
-                cv::Point2f fii_cmp;
-                epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-                cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-                           debug_feature_radius, color);
-              }
-            }
-
-            update_right_success = false ;
-          }
-        }
-
-
-        if (update_right_success) {
-          if (params.do_meas_fusion) {
-            fii.idepth_mu = right_mu_post;
-            fii.idepth_var = right_var_post;
-          } else {
-            fii.idepth_mu = right_mu_meas;
-            fii.idepth_var = right_var_meas;
-          }
-
-          fii.valid = true;
-          fii.num_updates++;
-          fii.num_dropouts = 0;
-          num_total_updates++;
-          success = true;
-        }
+//      // Load stuff into meas model.
+//      float right_mu_meas, right_var_meas;
+//      if (update_right_success) {
+//        stereo::InverseDepthMeasModel model(K0, K0inv, K1, K1inv, params.zparams);
+//        auto &pfii = pfs.at(fii.frame_id);
+//        model.loadGeometry(pfii->pose, fnew_right.pose);
+//        model.loadPaddedImages(pfii->img_pad[0], fnew_right.img_pad[0],
+//                               pfii->gradx_pad[0],
+//                               pfii->grady_pad[0],
+//                               fnew_right.gradx_pad[0], fnew_right.grady_pad[0]);
+//
+//        // Generate measurement.
+//
+//        bool sense_success = model.idepth(fii.xy, right_flow, &right_mu_meas, &right_var_meas);
+//
+//        if (!sense_success) {
+//          if (!params.debug_quiet && params.debug_print_verbose_errors) {
+//            fprintf(stderr, "FAIL:Sense: u_ref = (%f, %f), id = %f, var = %f\n",
+//                    fii.xy.x, fii.xy.y, fii.idepth_mu, fii.idepth_var);
+//          }
+//
+//          cv::Scalar color;
+//          fii.idepth_var *= params.fparams.process_fail_var_factor;
+//          if (fii.idepth_var > params.idepth_var_max) {
+//            fii.valid = false;
+//            ++num_fail_max_var;
+//
+//
+//            if (params.debug_draw_matches) {
+//              cv::Scalar color(0, 255, 0); // Green for max var.
+//              float blah;
+//              cv::Point2f fii_cmp;
+//              epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
+//              cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
+//                         debug_feature_radius, color);
+//            }
+//          }
+//
+//          fii.num_dropouts++;
+//          if (fii.num_dropouts > params.max_dropouts) {
+//            fii.valid = false;
+//            ++num_fail_max_dropouts;
+//
+//            if (params.debug_draw_matches) {
+//              cv::Scalar color(255, 0, 0); // Blue for max dropouts.
+//              float blah;
+//              cv::Point2f fii_cmp;
+//              epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
+//              cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
+//                         debug_feature_radius, color);
+//            }
+//          }
+//
+//          update_right_success = false;
+//        }
+//      }
+//
+//
+//        // Fuse.
+//        float right_mu_post, right_var_post;
+//        if (update_right_success) {
+//
+//          bool fuse_success =
+//                  stereo::inverse_depth_filter::update(fii.idepth_mu,
+//                                                       fii.idepth_var,
+//                                                       right_mu_meas, right_var_meas,
+//                                                       &right_mu_post, &right_var_post,
+//                                                       params.outlier_sigma_thresh);
+//
+//          if (!fuse_success) {
+//            if (!params.debug_quiet && params.debug_print_verbose_errors) {
+//              fprintf(stderr, "FAIL:Fuse: mu_meas = %f, var_meas = %f\n",
+//                      right_mu_meas, right_var_meas);
+//            }
+//
+//            cv::Scalar color;
+//            fii.idepth_var *= params.fparams.process_fail_var_factor;
+//            if (fii.idepth_var > params.idepth_var_max) {
+//              fii.valid = false;
+//              ++num_fail_max_var;
+//
+//              if (params.debug_draw_matches) {
+//                cv::Scalar color(0, 255, 0); // Green for max var.
+//                float blah;
+//                cv::Point2f fii_cmp;
+//                epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
+//                cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
+//                           debug_feature_radius, color);
+//              }
+//            }
+//
+//            fii.num_dropouts++;
+//            if (fii.num_dropouts > params.max_dropouts) {
+//              fii.valid = false;
+//              ++num_fail_max_dropouts;
+//
+//              if (params.debug_draw_matches) {
+//                cv::Scalar color(255, 0, 0); // Blue for max dropouts.
+//                float blah;
+//                cv::Point2f fii_cmp;
+//                epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
+//                cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
+//                           debug_feature_radius, color);
+//              }
+//            }
+//
+//            update_right_success = false ;
+//          }
+//        }
+//
+//
+//        if (update_right_success) {
+//          if (params.do_meas_fusion) {
+//            fii.idepth_mu = right_mu_post;
+//            fii.idepth_var = right_var_post;
+//          } else {
+//            fii.idepth_mu = right_mu_meas;
+//            fii.idepth_var = right_var_meas;
+//          }
+//
+//          fii.valid = true;
+//          fii.num_updates++;
+//          fii.num_dropouts = 0;
+//          num_total_updates++;
+//          success = true;
+//        }
 
 
     }  //  End params.update_using_right_frame

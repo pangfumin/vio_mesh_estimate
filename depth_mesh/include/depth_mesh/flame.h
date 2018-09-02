@@ -492,7 +492,6 @@ class Flame final {
   Matrix3f K1_;
   Matrix3f K1inv_;
 
-  stereo::EpipolarGeometry<float> epigeo_;
 
   uint32_t num_imgs_;
   utils::Frame::Ptr fnew_; // New frame.
