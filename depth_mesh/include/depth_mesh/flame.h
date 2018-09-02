@@ -123,7 +123,10 @@ class Flame final {
    * @param[in] params Parameter struct.
    */
   Flame(int width, int height,
-        const Matrix3f& K, const Matrix3f& Kinv,
+        const Matrix3f& K0,
+        const Matrix3f& K0inv,
+        const Matrix3f& K1,
+        const Matrix3f& K1inv,
         const Params& params = Params());
   ~Flame();
 
@@ -144,8 +147,12 @@ class Flame final {
    * @param[in] idepths_true True inverse depths (for debugging).
    * @return True if update successful. Outputs are only valid if returns True.
    */
-  bool update(const okvis::Time time, uint32_t img_id, const okvis::kinematics::Transformation& T_new,
-              const Image1b& img_new, bool is_poseframe,
+  bool update(const okvis::Time time, uint32_t img_id,
+          const okvis::kinematics::Transformation& T_new0,
+              const Image1b& img_new0,
+              const okvis::kinematics::Transformation& T_new1,
+              const Image1b& img_new1,
+              bool is_poseframe,
               const Image1f& idepths_true = Image1f());
 
 
@@ -318,10 +325,13 @@ class Flame final {
 
   // Update the depth estimates.
   static bool updateFeatureIDepths(const Params& params,
-                                   const Matrix3f& K,
-                                   const Matrix3f& Kinv,
+                                   const Matrix3f& K0,
+                                   const Matrix3f& K0inv,
+                                   const Matrix3f& K1,
+                                   const Matrix3f& K1inv,
                                    const FrameIDToFrame& pfs,
                                    const utils::Frame& fnew,
+                                   const utils::Frame& fnew_right,
                                    const utils::Frame& curr_pf,
                                    std::vector<FeatureWithIDepth>* feats,
                                    utils::StatsTracker* stats,
@@ -329,8 +339,6 @@ class Flame final {
 
   // Track a single feature in the new image.
   static bool trackFeature(const Params& params,
-                           const Matrix3f& K,
-                           const Matrix3f& Kinv,
                            const FrameIDToFrame& pfs,
                            const stereo::EpipolarGeometry<float>& epigeo,
                            const utils::Frame& fnew,
@@ -478,13 +486,16 @@ class Flame final {
   int width_;
   int height_;
 
-  Matrix3f K_;
-  Matrix3f Kinv_;
+  Matrix3f K0_;
+  Matrix3f K0inv_;
 
-  stereo::EpipolarGeometry<float> epigeo_;
+  Matrix3f K1_;
+  Matrix3f K1inv_;
+
 
   uint32_t num_imgs_;
   utils::Frame::Ptr fnew_; // New frame.
+  utils::Frame::Ptr fnew_right_; // New frame.
   utils::Frame::Ptr fprev_; // Previous frame.
 
   // Lock when performing an update or accessing internals.

@@ -1,7 +1,9 @@
 #include "depth_estimate.hpp"
 
 namespace flame {
-    DepthEstimate::DepthEstimate(ros::NodeHandle &pnh, Eigen::Matrix3f K, int width, int height) :
+    DepthEstimate::DepthEstimate(ros::NodeHandle &pnh, Eigen::Matrix3f K0,
+            Eigen::Matrix3f K1,
+    int width, int height) :
             stats_(),
             load_(getpid()),
             pnh_(pnh),
@@ -10,10 +12,12 @@ namespace flame {
             camera_frame_id_(),
             output_dir_(),
             pass_in_truth_(false),
-            K_(K),
             width_(width),
             height_(height),
-            Kinv_(K.inverse()),
+            K0_(K0),
+            K0inv_(K0.inverse()),
+            K1_(K1),
+            K1inv_(K1.inverse()),
             max_angular_rate_(0.0f),
             prev_time_(0),
             prev_pose_(),
@@ -136,14 +140,14 @@ namespace flame {
         FLAME_ASSERT(resize_factor_ == 1);
 
 
-        Kinv_ = K.inverse();
+        K0inv_ = K0.inverse();
+        K1inv_ = K1.inverse();
 
         // Initialize depth sensor.
         ROS_INFO_COND(!params_.debug_quiet, "Constructing Flame...\n");
-        sensor_ = std::make_shared<flame::Flame>(width,
-                                                 height,
-                                                 K,
-                                                 Kinv_,
+        sensor_ = std::make_shared<flame::Flame>(width, height,
+                                                 K0, K0inv_,
+                                                 K1, K1inv_,
                                                  params_);
 
 
@@ -194,18 +198,22 @@ namespace flame {
 
 
     void DepthEstimate::processFrame(const uint32_t img_id, const okvis::Time time,
-                                     const okvis::kinematics::Transformation &pose,
-                                     const cv::Mat1b &img_gray,
+                                     const okvis::kinematics::Transformation &pose0,
+                                     const cv::Mat1b &img_gray0,
+                                     const okvis::kinematics::Transformation &pose1,
+                                     const cv::Mat1b &img_gray1,
                                      bool asKeyframe) {
         stats_.tick("process_frame");
 
         Image3b  rgb;
-        cv::cvtColor(img_gray,rgb, CV_GRAY2BGR);
+        cv::cvtColor(img_gray0,rgb, CV_GRAY2BGR);
         /*==================== Process image ====================*/
         bool is_poseframe = asKeyframe;
         bool update_success = false;
 
-        update_success = sensor_->update(time, img_id, pose, img_gray,
+        update_success = sensor_->update(time, img_id,
+                pose0, img_gray0,
+                                         pose1, img_gray1,
                                          is_poseframe);
 
         if (!update_success) {
@@ -217,13 +225,13 @@ namespace flame {
         if (max_angular_rate_ > 0.0f) {
             // Check angle difference between last and current pose. If we're rotating,
             // we shouldn't publish output since it's probably too noisy.
-            Eigen::Quaternionf q_delta = pose.hamilton_quaternion().cast<float>() *
+            Eigen::Quaternionf q_delta = pose0.hamilton_quaternion().cast<float>() *
                                          prev_pose_.hamilton_quaternion().inverse().cast<float>();
             float angle_delta = fu::fast_abs(Eigen::AngleAxisf(q_delta).angle());
             float angle_rate = angle_delta / (time.toSec() - prev_time_.toSec());
 
             prev_time_ = time;
-            prev_pose_ = pose;
+            prev_pose_ = pose0;
 
             if (angle_rate * 180.0f / M_PI > max_angular_rate_) {
                 // Angular rate is too high.
@@ -247,7 +255,7 @@ namespace flame {
             std::vector<bool> tri_validity;
             sensor_->getInverseDepthMesh(&vtx, &idepths, &normals, &triangles,
                                          &tri_validity, &edges);
-            publishDepthMesh(mesh_pub_, camera_frame_id_, time.toSec(), Kinv_, vtx,
+            publishDepthMesh(mesh_pub_, camera_frame_id_, time.toSec(), K0inv_, vtx,
                              idepths, normals, triangles, tri_validity, rgb);
         }
 
@@ -257,7 +265,7 @@ namespace flame {
             sensor_->getFilteredInverseDepthMap(&idepthmap);
 
             if (publish_idepthmap_) {
-                publishDepthMap(idepth_pub_, camera_frame_id_, time.toSec(), K_,
+                publishDepthMap(idepth_pub_, camera_frame_id_, time.toSec(), K0_,
                                 idepthmap);
             }
 
@@ -275,20 +283,20 @@ namespace flame {
             }
 
             if (publish_depthmap_) {
-                publishDepthMap(depth_pub_, camera_frame_id_, time.toSec(), K_,
+                publishDepthMap(depth_pub_, camera_frame_id_, time.toSec(), K0_,
                                 depth_est);
             }
 
             if (publish_cloud_) {
                 float max_depth = (params_.do_idepth_triangle_filter) ?
                                   1.0f / params_.min_triangle_idepth : std::numeric_limits<float>::max();
-                publishPointCloud(cloud_pub_, camera_frame_id_, time.toSec(), K_,
+                publishPointCloud(cloud_pub_, camera_frame_id_, time.toSec(), K0_,
                                   depth_est, 0.1f, max_depth);
             }
         }
 
         if (publish_features_) {
-            cv::Mat1f depth_raw(img_gray.rows, img_gray.cols,
+            cv::Mat1f depth_raw(img_gray0.rows, img_gray0.cols,
                                 std::numeric_limits<float>::quiet_NaN());
             if (publish_features_) {
                 std::vector<cv::Point2f> vertices;
@@ -312,7 +320,7 @@ namespace flame {
                 }
             }
 
-            publishDepthMap(features_pub_, camera_frame_id_, time.toSec(), K_,
+            publishDepthMap(features_pub_, camera_frame_id_, time.toSec(), K0_,
                             depth_raw);
         }
 

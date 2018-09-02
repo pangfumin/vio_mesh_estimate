@@ -40,6 +40,7 @@ struct Params {
 
   // Screen out low-gradient points after projecting to new image.
   bool do_grad_check_after_projection = false;
+  bool update_using_right_frame = true;
 
   int num_levels = 5; // Number of pyramid levels.
 

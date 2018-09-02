@@ -23,7 +23,6 @@ endif()
 
 # Build main library.
 set(FLAME_SRCS
-        src/mesh_estimator.cpp
         src/flame.cc
         src/optimizers/nltgv2_l1_graph_regularizer.cc
         src/stereo/inverse_depth_filter.cc

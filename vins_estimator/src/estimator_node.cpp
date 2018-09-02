@@ -22,7 +22,6 @@
 #include <aslam/pipeline/visual-pipeline-null.h>
 #include <feature-tracking/vo-feature-tracking-pipeline.h>
 
-#include <depth_mesh/mesh_estimator.hpp>
 #include <depth_mesh/params.h>
 
 #include "depth_estimate.hpp"
@@ -619,11 +618,16 @@ void estimate_depth_mesh() {
         cv::Mat undistort0;
         cv::remap(updateMeshInfo.stereoCameraData.image0, undistort0, undistort0_map1,
                 undistort0_map2, cv::INTER_LINEAR);
+        cv::Mat undistort1;
+        cv::remap(updateMeshInfo.stereoCameraData.image1, undistort1, undistort1_map1,
+                  undistort1_map2, cv::INTER_LINEAR);
 
 
-        mesh_estimator->processFrame(id++, time, T_WC1,
-                                     undistort0, 
-                                     isKeyframe);
+        mesh_estimator->processFrame(id++, time,
+                T_WC0,
+                                     undistort0,
+                                     T_WC1,
+                                     undistort1, isKeyframe);
         int remove_cnt = mesh_estimator->updateFramePoses(updateMeshInfo.vio_state,
                                                           okvis::kinematics::Transformation(T_BC0.matrix()));
 
@@ -649,15 +653,10 @@ int main(int argc, char **argv)
 #endif
     ROS_WARN("waiting for image and imu...");
 
-
-
     registerPub(n);
     pub_img = n.advertise<sensor_msgs::PointCloud>("feature", 1000);
     pub_match = n.advertise<sensor_msgs::Image>("feature_img",1000);
     pub_depth = n.advertise<sensor_msgs::Image>("depth_img",1000);
-
-
-
 
 
     std::string config_file
@@ -667,7 +666,9 @@ int main(int argc, char **argv)
     voFeatureTrackingPipeline
         = std::make_shared<feature_tracking::VOFeatureTrackingPipeline>(camera_system);
 
-    mesh_estimator = std::make_shared<flame::DepthEstimate>(n, K0.cast<float>(), imageWidth, imageHeight);
+    mesh_estimator = std::make_shared<flame::DepthEstimate>(n,
+            K0.cast<float>(),  K1.cast<float>(),
+            imageWidth, imageHeight);
 
     // Initialize the pipeline.
     static constexpr bool kCopyImages = false;

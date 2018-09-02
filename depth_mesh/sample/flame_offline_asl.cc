@@ -235,6 +235,8 @@ class FlameOffline final {
                                              height,
                                              K,
                                              Kinv_,
+                                             K,
+                                             Kinv_,
                                              params_);
 
 
@@ -290,35 +292,24 @@ class FlameOffline final {
 
 
   void processFrame(const uint32_t img_id, const okvis::Time time,
-                    const okvis::kinematics::Transformation& pose, const cv::Mat3b& rgb,
+                    const okvis::kinematics::Transformation& pose0, const cv::Mat3b& rgb0,
+                    const okvis::kinematics::Transformation& pose1, const cv::Mat3b& rgb1,
                     const cv::Mat1f& depth) {
     stats_.tick("process_frame");
 
     /*==================== Process image ====================*/
     // Convert to grayscale.
-    cv::Mat1b img_gray;
-    cv::cvtColor(rgb, img_gray, cv::COLOR_RGB2GRAY);
+    cv::Mat1b img_gray0;
+    cv::cvtColor(rgb0, img_gray0, cv::COLOR_RGB2GRAY);
+      cv::Mat1b img_gray1;
+      cv::cvtColor(rgb1, img_gray1, cv::COLOR_RGB2GRAY);
 
     bool is_poseframe = (img_id % poseframe_subsample_factor_) == 0;
     bool update_success = false;
     if (!pass_in_truth_) {
-      update_success = sensor_->update(time, img_id, pose, img_gray,
+      update_success = sensor_->update(time, img_id, pose0, img_gray0,
+                                       pose1, img_gray1,
                                        is_poseframe);
-    } else {
-      // Convert true depth to idepth.
-      cv::Mat1f idepths_true(rgb.rows, rgb.cols, std::numeric_limits<float>::quiet_NaN());
-      for (int ii = 0; ii < depth.rows; ++ii) {
-        for (int jj = 0; jj < depth.cols; ++jj) {
-          if (!std::isnan(depth(ii, jj)) && (depth(ii, jj) > 0)) {
-            idepths_true(ii, jj) = 1.0f/depth(ii, jj);
-          } else {
-            idepths_true(ii, jj) = std::numeric_limits<float>::quiet_NaN();
-          }
-        }
-      }
-
-      update_success = sensor_->update(time, img_id, pose, img_gray, is_poseframe,
-                                       idepths_true);
     }
 
     if (!update_success) {
@@ -330,13 +321,13 @@ class FlameOffline final {
     if (max_angular_rate_ > 0.0f) {
       // Check angle difference between last and current pose. If we're rotating,
       // we shouldn't publish output since it's probably too noisy.
-      Eigen::Quaternionf q_delta = pose.hamilton_quaternion().cast<float>() *
+      Eigen::Quaternionf q_delta = pose0.hamilton_quaternion().cast<float>() *
           prev_pose_.hamilton_quaternion().inverse().cast<float>();
       float angle_delta = fu::fast_abs(Eigen::AngleAxisf(q_delta).angle());
       float angle_rate = angle_delta / (time.toSec() - prev_time_.toSec());
 
       prev_time_ = time;
-      prev_pose_ = pose;
+      prev_pose_ = pose0;
 
       if (angle_rate * 180.0f / M_PI > max_angular_rate_) {
         // Angular rate is too high.
@@ -361,7 +352,7 @@ class FlameOffline final {
       sensor_->getInverseDepthMesh(&vtx, &idepths, &normals, &triangles,
                                    &tri_validity, &edges);
       publishDepthMesh(mesh_pub_, camera_frame_id_, time.toSec(), Kinv_, vtx,
-                       idepths, normals, triangles, tri_validity, rgb);
+                       idepths, normals, triangles, tri_validity, rgb0);
     }
 
     cv::Mat1f idepthmap;
@@ -401,7 +392,7 @@ class FlameOffline final {
     }
 
     if (publish_features_) {
-      cv::Mat1f depth_raw(img_gray.rows, img_gray.cols,
+      cv::Mat1f depth_raw(img_gray0.rows, img_gray0.cols,
                           std::numeric_limits<float>::quiet_NaN());
       if (publish_features_) {
         std::vector<cv::Point2f> vertices;
@@ -670,15 +661,20 @@ int main(int argc, char *argv[]) {
 
     if (num_imgs % 1 == 0) {
       // Eat data.
-      Eigen::Isometry3d eigen_pose = Eigen::Isometry3d::Identity();
-      eigen_pose.linear() = q1.toRotationMatrix();
-      eigen_pose.translation() = t1;
-      okvis::kinematics::Transformation pose(eigen_pose.matrix());
+      Eigen::Isometry3d eigen_pose0 = Eigen::Isometry3d::Identity();
+      eigen_pose0.linear() = q0.toRotationMatrix();
+      eigen_pose0.translation() = t0;
+      okvis::kinematics::Transformation pose0(eigen_pose0.matrix());
+
+        Eigen::Isometry3d eigen_pose1 = Eigen::Isometry3d::Identity();
+        eigen_pose1.linear() = q1.toRotationMatrix();
+        eigen_pose1.translation() = t1;
+        okvis::kinematics::Transformation pose1(eigen_pose1.matrix());
 
 
       okvis::Time ts(time);
-      node.processFrame(img_id, ts, pose,
-                   rgb1, depth);
+      node.processFrame(img_id, ts, pose0,
+                   rgb0, pose1, rgb1, depth);
     }
 //
 //    cv::imshow("rgb0", rgb0);
