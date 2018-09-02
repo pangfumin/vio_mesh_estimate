@@ -622,7 +622,8 @@ void estimate_depth_mesh() {
 
 
         mesh_estimator->processFrame(id++, time, T_WC1,
-                                     undistort0, isKeyframe);
+                                     undistort0, 
+                                     isKeyframe);
         int remove_cnt = mesh_estimator->updateFramePoses(updateMeshInfo.vio_state,
                                                           okvis::kinematics::Transformation(T_BC0.matrix()));
 

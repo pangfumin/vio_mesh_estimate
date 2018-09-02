@@ -46,7 +46,8 @@ namespace ros_sensor_streams {
 
 ASLRGBDOfflineStream::ASLRGBDOfflineStream(ros::NodeHandle& nh,
                                            const std::string& pose_path,
-                                           const std::string& rgb_path,
+                                           const std::string& rgb0_path,
+                                           const std::string& rgb1_path,
                                            const std::string& depth_path,
                                            const std::string& camera_name,
                                            const std::string& camera_world_frame_id,
@@ -62,19 +63,25 @@ ASLRGBDOfflineStream::ASLRGBDOfflineStream(ros::NodeHandle& nh,
     publish_(publish),
     curr_idx_(0),
     pose_data_(pose_path),
-    rgb_data_(rgb_path),
+    rgb0_data_(rgb0_path),
+    rgb1_data_(rgb1_path),
     depth_data_(),
     pose_idxs_(),
-    rgb_idxs_(),
+    rgb0_idxs_(),
+    rgb1_idxs_(),
     depth_idxs_(),
     q_pose_in_body_(),
     t_pose_in_body_(),
-    q_cam_in_body_(),
-    t_cam_in_body_(),
+    q_cam0_in_body_(),
+    t_cam0_in_body_(),
+    q_cam1_in_body_(),
+    t_cam1_in_body_(),
     width_(),
     height_(),
-    K_(Eigen::Matrix3f::Identity()),
-    cinfo_(),
+    K0_(Eigen::Matrix3f::Identity()),
+    K1_(Eigen::Matrix3f::Identity()),
+    cinfo0_(),
+    cinfo1_(),
     intensity_to_depth_factor_(),
     tf_pub_(),
     it_(nh),
@@ -88,37 +95,67 @@ ASLRGBDOfflineStream::ASLRGBDOfflineStream(ros::NodeHandle& nh,
   }
 
   // Set calibration information.
-  width_ = rgb_data_.metadata()["resolution"][0].as<uint32_t>();
-  height_ = rgb_data_.metadata()["resolution"][1].as<uint32_t>();
-  cinfo_.width = width_;
-  cinfo_.height = height_;
-  cinfo_.distortion_model = "plumb_bob";
+  width_ = rgb0_data_.metadata()["resolution"][0].as<uint32_t>();
+  height_ = rgb0_data_.metadata()["resolution"][1].as<uint32_t>();
+  cinfo0_.width = width_;
+  cinfo0_.height = height_;
+  cinfo0_.distortion_model = "plumb_bob";
+  cinfo1_.width = width_;
+  cinfo1_.height = height_;
+  cinfo1_.distortion_model = "plumb_bob";
 
-  float fu = rgb_data_.metadata()["intrinsics"][0].as<float>();
-  float fv = rgb_data_.metadata()["intrinsics"][1].as<float>();
-  float cu = rgb_data_.metadata()["intrinsics"][2].as<float>();
-  float cv = rgb_data_.metadata()["intrinsics"][3].as<float>();
+  float fu = rgb0_data_.metadata()["intrinsics"][0].as<float>();
+  float fv = rgb0_data_.metadata()["intrinsics"][1].as<float>();
+  float cu = rgb0_data_.metadata()["intrinsics"][2].as<float>();
+  float cv = rgb0_data_.metadata()["intrinsics"][3].as<float>();
 
-  cinfo_.K = {fu, 0, cu,
+  cinfo0_.K = {fu, 0, cu,
               0, fv, cv,
               0, 0, 1};
 
-  K_(0, 0) = fu;
-  K_(0, 2) = cu;
-  K_(1, 1) = fv;
-  K_(1, 2) = cv;
+  K0_(0, 0) = fu;
+  K0_(0, 2) = cu;
+  K0_(1, 1) = fv;
+  K0_(1, 2) = cv;
 
-  cinfo_.P = {fu, 0, cu, 0,
+  cinfo0_.P = {fu, 0, cu, 0,
               0, fv, cv, 0,
               0, 0, 1, 0};
 
-  float k1 = rgb_data_.metadata()["distortion_coefficients"][0].as<float>();
-  float k2 = rgb_data_.metadata()["distortion_coefficients"][1].as<float>();
-  float p1 = rgb_data_.metadata()["distortion_coefficients"][2].as<float>();
-  float p2 = rgb_data_.metadata()["distortion_coefficients"][3].as<float>();
+  float k1 = rgb0_data_.metadata()["distortion_coefficients"][0].as<float>();
+  float k2 = rgb0_data_.metadata()["distortion_coefficients"][1].as<float>();
+  float p1 = rgb0_data_.metadata()["distortion_coefficients"][2].as<float>();
+  float p2 = rgb0_data_.metadata()["distortion_coefficients"][3].as<float>();
   float k3 = 0.0f;
 
-  cinfo_.D = {k1, k2, p1, p2, k3};
+  cinfo0_.D = {k1, k2, p1, p2, k3};
+
+  //
+  float fu1 = rgb1_data_.metadata()["intrinsics"][0].as<float>();
+  float fv1 = rgb1_data_.metadata()["intrinsics"][1].as<float>();
+  float cu1 = rgb1_data_.metadata()["intrinsics"][2].as<float>();
+  float cv1 = rgb1_data_.metadata()["intrinsics"][3].as<float>();
+
+  cinfo1_.K = {fu1, 0, cu1,
+               0, fv1, cv1,
+               0, 0, 1};
+
+  K1_(0, 0) = fu1;
+  K1_(0, 2) = cu1;
+  K1_(1, 1) = fv1;
+  K1_(1, 2) = cv1;
+
+  cinfo1_.P = {fu1, 0, cu1, 0,
+               0, fv1, cv1, 0,
+               0, 0, 1, 0};
+
+  float k11 = rgb1_data_.metadata()["distortion_coefficients"][0].as<float>();
+  float k21 = rgb1_data_.metadata()["distortion_coefficients"][1].as<float>();
+  float p11 = rgb1_data_.metadata()["distortion_coefficients"][2].as<float>();
+  float p21 = rgb1_data_.metadata()["distortion_coefficients"][3].as<float>();
+  float k31 = 0.0f;
+
+  cinfo1_.D = {k11, k21, p11, p21, k31};
 
   if (!depth_data_.path().empty()) {
     intensity_to_depth_factor_ = depth_data_.metadata()["depth_scale_factor"].as<float>();
@@ -141,10 +178,16 @@ ASLRGBDOfflineStream::ASLRGBDOfflineStream(ros::NodeHandle& nh,
   t_pose_in_body_ = T_pose_in_body.block<3, 1>(0, 3);
 
   // Extract transform of camera in body frame.
-  Eigen::Matrix<double, 4, 4, Eigen::RowMajor> T_cam_in_body;
-  du::readMatrix(rgb_data_.metadata(), "T_BS", 4, 4, T_cam_in_body.data());
-  q_cam_in_body_ = Eigen::Quaterniond(T_cam_in_body.block<3, 3>(0, 0));
-  t_cam_in_body_ = T_cam_in_body.block<3, 1>(0, 3);
+  Eigen::Matrix<double, 4, 4, Eigen::RowMajor> T_cam0_in_body;
+  du::readMatrix(rgb0_data_.metadata(), "T_BS", 4, 4, T_cam0_in_body.data());
+  q_cam0_in_body_ = Eigen::Quaterniond(T_cam0_in_body.block<3, 3>(0, 0));
+  t_cam0_in_body_ = T_cam0_in_body.block<3, 1>(0, 3);
+
+  // Extract transform of camera in body frame.
+  Eigen::Matrix<double, 4, 4, Eigen::RowMajor> T_cam1_in_body;
+  du::readMatrix(rgb1_data_.metadata(), "T_BS", 4, 4, T_cam1_in_body.data());
+  q_cam1_in_body_ = Eigen::Quaterniond(T_cam1_in_body.block<3, 3>(0, 0));
+  t_cam1_in_body_ = T_cam1_in_body.block<3, 1>(0, 3);
 
   return;
 }
@@ -158,8 +201,8 @@ void ASLRGBDOfflineStream::associateData() {
 
   // Match rgb and depth to pose separately.
   std::vector<std::size_t> pose_rgb_idxs;
-  std::vector<std::size_t> rgb_pose_idxs;
-  du::associate(rgb_data_.data(), pose_data_.data(), &rgb_pose_idxs,
+  std::vector<std::size_t> rgb0_pose_idxs;
+  du::associate(rgb0_data_.data(), pose_data_.data(), &rgb0_pose_idxs,
                 &pose_rgb_idxs, diff);
 
   std::vector<std::size_t> pose_depth_idxs;
@@ -170,7 +213,7 @@ void ASLRGBDOfflineStream::associateData() {
   } else {
     // No depth data. Just copy rgb data.
     pose_depth_idxs = pose_rgb_idxs;
-    depth_pose_idxs = rgb_pose_idxs;
+    depth_pose_idxs = rgb0_pose_idxs;
   }
 
   // Now take the intersection of pose_rgb_idxs and pose_depth_idxs to get the
@@ -183,10 +226,12 @@ void ASLRGBDOfflineStream::associateData() {
   // Now get corresponding rgb and depth idxs.
   std::unordered_set<std::size_t> pose_idxs_set(pose_idxs_.begin(), pose_idxs_.end());
 
-  rgb_idxs_.clear();
+  rgb0_idxs_.clear();
+  rgb1_idxs_.clear();
   for (int ii = 0; ii < pose_rgb_idxs.size(); ++ii) {
     if (pose_idxs_set.count(pose_rgb_idxs[ii]) > 0) {
-      rgb_idxs_.push_back(rgb_pose_idxs[ii]);
+      rgb0_idxs_.push_back(rgb0_pose_idxs[ii]);
+      rgb1_idxs_.push_back(rgb0_pose_idxs[ii]);
     }
   }
 
@@ -203,9 +248,12 @@ void ASLRGBDOfflineStream::associateData() {
 }
 
 void ASLRGBDOfflineStream::get(uint32_t* id, double* time,
-                               cv::Mat3b* rgb, cv::Mat1f* depth,
-                               Eigen::Quaterniond* quat,
-                               Eigen::Vector3d* trans) {
+                               cv::Mat3b* rgb0, cv::Mat3b* rgb1,
+                               cv::Mat1f* depth,
+                               Eigen::Quaterniond* quat0,
+                               Eigen::Vector3d* trans0,
+                               Eigen::Quaterniond* quat1,
+                                Eigen::Vector3d* trans1) {
   // Make sure we actually have data to read in.
   if (empty()) {
     ROS_ERROR("No more data!\n");
@@ -213,7 +261,7 @@ void ASLRGBDOfflineStream::get(uint32_t* id, double* time,
   }
 
   *id = curr_idx_;
-  *time = static_cast<double>(rgb_data_[rgb_idxs_[curr_idx_]].timestamp) * 1e-9;
+  *time = static_cast<double>(rgb0_data_[rgb0_idxs_[curr_idx_]].timestamp) * 1e-9;
 
   // Load raw pose, which is the pose of the pose sensor wrt a given world
   // frame.
@@ -228,21 +276,25 @@ void ASLRGBDOfflineStream::get(uint32_t* id, double* time,
   Eigen::Quaterniond q_body_in_world(q_pose_in_world * q_body_in_pose);
   Eigen::Vector3d t_body_in_world(q_pose_in_world * t_body_in_pose + t_pose_in_world);
 
-  Eigen::Quaterniond q_cam_in_world = q_body_in_world * q_cam_in_body_;
-  Eigen::Vector3d t_cam_in_world = q_body_in_world * t_cam_in_body_ + t_body_in_world;
+  Eigen::Quaterniond q_cam0_in_world = q_body_in_world * q_cam0_in_body_;
+  Eigen::Vector3d t_cam0_in_world = q_body_in_world * t_cam0_in_body_ + t_body_in_world;
 
-  // Convert poses to optical coordinates.
+Eigen::Quaterniond q_cam1_in_world = q_body_in_world * q_cam1_in_body_;
+Eigen::Vector3d t_cam1_in_world = q_body_in_world * t_cam1_in_body_ + t_body_in_world;
+
+
+// Convert poses to optical coordinates.
   switch (world_frame_) {
     case RDF: {
-      *quat = q_cam_in_world;
-      *trans = t_cam_in_world;
+      *quat0 = q_cam0_in_world;
+      *trans0 = t_cam0_in_world;
       break;
     }
     case FLU: {
       // Local RDF frame in global FLU frame.
       Eigen::Quaterniond q_flu_to_rdf(-0.5, -0.5, 0.5, -0.5);
-      *quat = q_flu_to_rdf * q_cam_in_world;
-      *trans = q_flu_to_rdf * t_cam_in_world;
+      *quat0 = q_flu_to_rdf * q_cam0_in_world;
+      *trans0 = q_flu_to_rdf * t_cam0_in_world;
       break;
     }
     case FRD: {
@@ -253,8 +305,8 @@ void ASLRGBDOfflineStream::get(uint32_t* id, double* time,
           1.0, 0.0, 0.0;
 
       Eigen::Quaterniond q_frd_to_rdf(R_frd_to_rdf);
-      *quat = q_frd_to_rdf * q_cam_in_world;
-      *trans = q_frd_to_rdf * t_cam_in_world;
+      *quat0 = q_frd_to_rdf * q_cam0_in_world;
+      *trans0 = q_frd_to_rdf * t_cam0_in_world;
       break;
     }
     case RFU: {
@@ -265,8 +317,11 @@ void ASLRGBDOfflineStream::get(uint32_t* id, double* time,
           0.0, 1.0, 0.0;
 
       Eigen::Quaterniond q_rfu_to_rdf(R_rfu_to_rdf);
-      *quat = q_rfu_to_rdf * q_cam_in_world;
-      *trans = q_rfu_to_rdf * t_cam_in_world;
+      *quat0 = q_rfu_to_rdf * q_cam0_in_world;
+      *trans0 = q_rfu_to_rdf * t_cam0_in_world;
+
+    *quat1 = q_rfu_to_rdf * q_cam1_in_world;
+    *trans1 = q_rfu_to_rdf * t_cam1_in_world;
       break;
     }
     default:
@@ -275,14 +330,25 @@ void ASLRGBDOfflineStream::get(uint32_t* id, double* time,
   }
 
   // Load RGB.
-  bfs::path rgb_path = bfs::path(rgb_data_.path()) / bfs::path("data") /
-      bfs::path(rgb_data_[rgb_idxs_[curr_idx_]].filename);
-  cv::Mat3b rgb_raw = cv::imread(rgb_path.string(), cv::IMREAD_COLOR);
+  bfs::path rgb0_path = bfs::path(rgb0_data_.path()) / bfs::path("data") /
+      bfs::path(rgb0_data_[rgb0_idxs_[curr_idx_]].filename);
+  cv::Mat3b rgb0_raw = cv::imread(rgb0_path.string(), cv::IMREAD_COLOR);
+
+
 
   // Undistort image.
-  cv::Mat Kcv;
-  eigen2cv(K_, Kcv);
-  cv::undistort(rgb_raw, *rgb, Kcv, cinfo_.D);
+  cv::Mat Kcv0;
+  cv::Mat Kcv1;
+  eigen2cv(K0_, Kcv0);
+  cv::undistort(rgb0_raw, *rgb0, Kcv0, cinfo0_.D);
+
+
+  bfs::path rgb1_path = bfs::path(rgb1_data_.path()) / bfs::path("data") /
+                        bfs::path(rgb1_data_[rgb1_idxs_[curr_idx_]].filename);
+  //std::cout<< "rgb1_path: " << rgb1_path.string() << std::endl;
+  cv::Mat3b rgb1_raw = cv::imread(rgb1_path.string(), cv::IMREAD_COLOR);
+  eigen2cv(K1_, Kcv1);
+  cv::undistort(rgb1_raw, *rgb1, Kcv1, cinfo1_.D);
 
   if (!depth_data_.path().empty()) {
     // Have depth data.
@@ -310,14 +376,14 @@ void ASLRGBDOfflineStream::get(uint32_t* id, double* time,
     tf.header.stamp.fromSec(*time);
     tf.header.frame_id = camera_world_frame_id_;
     tf.child_frame_id = camera_frame_id_;
-    tf.transform.rotation.w = quat->w();
-    tf.transform.rotation.x = quat->x();
-    tf.transform.rotation.y = quat->y();
-    tf.transform.rotation.z = quat->z();
+    tf.transform.rotation.w = quat0->w();
+    tf.transform.rotation.x = quat0->x();
+    tf.transform.rotation.y = quat0->y();
+    tf.transform.rotation.z = quat0->z();
 
-    tf.transform.translation.x = (*trans)(0);
-    tf.transform.translation.y = (*trans)(1);
-    tf.transform.translation.z = (*trans)(2);
+    tf.transform.translation.x = (*trans0)(0);
+    tf.transform.translation.y = (*trans0)(1);
+    tf.transform.translation.z = (*trans0)(2);
     tf_pub_.sendTransform(tf);
 
     // Publish messages over ROS.
@@ -326,10 +392,10 @@ void ASLRGBDOfflineStream::get(uint32_t* id, double* time,
     header.frame_id = camera_frame_id_;
 
     sensor_msgs::CameraInfo::Ptr cinfo_msg(new sensor_msgs::CameraInfo);
-    *cinfo_msg = cinfo_;
+    *cinfo_msg = cinfo0_;
     cinfo_msg->header = header;
 
-    cv_bridge::CvImage rgb_cvi(header, "bgr8", *rgb);
+    cv_bridge::CvImage rgb_cvi(header, "bgr8", *rgb0);
     rgb_pub_.publish(rgb_cvi.toImageMsg(), cinfo_msg);
 
     if (!depth_data_.path().empty()) {

@@ -1,6 +1,7 @@
 # flame_offline parameters.
 pose_path: /home/pang/dataset/euroc/MH_01_easy/mav0/state_groundtruth_estimate0
-rgb_path: /home/pang/dataset/euroc/MH_01_easy/mav0/cam0
+rgb0_path: /home/pang/dataset/euroc/MH_01_easy/mav0/cam0
+rgb1_path: /home/pang/dataset/euroc/MH_01_easy/mav0/cam1
 depth_path: /media/pang/Plus/dataset/MH_01_easy/mav0/depthmap0
 world_frame: RFU
 

@@ -92,7 +92,8 @@ class ASLRGBDOfflineStream final  {
    */
   ASLRGBDOfflineStream(ros::NodeHandle& nh,
                        const std::string& pose_path,
-                       const std::string& rgb_path,
+                       const std::string& rgb0_path,
+                       const std::string& rgb1_path,
                        const std::string& depth_path,
                        const std::string& camera_name,
                        const std::string& camera_world_frame_id,
@@ -118,8 +119,13 @@ class ASLRGBDOfflineStream final  {
    * @param[out] quat Camera orientation.
    * @param[out] trans Camera translation.
    */
-  void get(uint32_t* id, double* time, cv::Mat3b* rgb, cv::Mat1f* depth,
-           Eigen::Quaterniond* quat, Eigen::Vector3d* trans);
+  void get(uint32_t* id, double* time,
+           cv::Mat3b* rgb0,cv::Mat3b* rgb1,
+           cv::Mat1f* depth,
+           Eigen::Quaterniond* quat0,
+           Eigen::Vector3d* trans0,
+           Eigen::Quaterniond* quat1,
+           Eigen::Vector3d* trans1);
 
   // Accessors.
   bool empty() const { return curr_idx_ >= static_cast<int>(pose_idxs_.size()); }
@@ -128,7 +134,8 @@ class ASLRGBDOfflineStream final  {
   int width() const { return width_; }
   int height() const { return height_; }
 
-  const Eigen::Matrix3f& K() const { return K_; }
+  const Eigen::Matrix3f& K0() const { return K0_; }
+  const Eigen::Matrix3f& K1() const { return K1_; }
 
   const std::string& camera_frame_id() const { return camera_frame_id_; }
 
@@ -150,25 +157,32 @@ class ASLRGBDOfflineStream final  {
 
   // Raw ASl datasets.
   dataset_utils::asl::Dataset<dataset_utils::asl::PoseData> pose_data_;
-  dataset_utils::asl::Dataset<dataset_utils::asl::FileData> rgb_data_;
+  dataset_utils::asl::Dataset<dataset_utils::asl::FileData> rgb0_data_;
+  dataset_utils::asl::Dataset<dataset_utils::asl::FileData> rgb1_data_;
   dataset_utils::asl::Dataset<dataset_utils::asl::FileData> depth_data_;
 
   // Synchronized indexes into each dataset.
   std::vector<std::size_t> pose_idxs_;
-  std::vector<std::size_t> rgb_idxs_;
+  std::vector<std::size_t> rgb0_idxs_;
+  std::vector<std::size_t> rgb1_idxs_;
   std::vector<std::size_t> depth_idxs_;
 
   // Sensor extrinsics relative to body frame.
   Eigen::Quaterniond q_pose_in_body_; // Transform of the pose sensor in body frame.
   Eigen::Vector3d t_pose_in_body_;
 
-  Eigen::Quaterniond q_cam_in_body_; // Assume both rgb/depth images have same extrinsics.
-  Eigen::Vector3d t_cam_in_body_;
+  Eigen::Quaterniond q_cam0_in_body_; // Assume both rgb/depth images have same extrinsics.
+  Eigen::Vector3d t_cam0_in_body_;
+
+    Eigen::Quaterniond q_cam1_in_body_; // Assume both rgb/depth images have same extrinsics.
+    Eigen::Vector3d t_cam1_in_body_;
 
   int width_;
   int height_;
-  Eigen::Matrix3f K_;
-  sensor_msgs::CameraInfo cinfo_;
+  Eigen::Matrix3f K0_;
+  Eigen::Matrix3f K1_;
+  sensor_msgs::CameraInfo cinfo0_;
+  sensor_msgs::CameraInfo cinfo1_;
   float intensity_to_depth_factor_;
 
   // Publishers.

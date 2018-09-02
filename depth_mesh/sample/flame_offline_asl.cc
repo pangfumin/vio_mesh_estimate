@@ -39,6 +39,7 @@
 
 #include <opencv2/core/core.hpp>
 #include <opencv2/imgproc/imgproc.hpp>
+#include <opencv2/highgui/highgui.hpp>
 
 #include <ros/ros.h>
 
@@ -604,8 +605,9 @@ int main(int argc, char *argv[]) {
   std::string pose_path;
   getParamOrFail(pnh, "pose_path", &pose_path);
 
-  std::string rgb_path;
-  getParamOrFail(pnh, "rgb_path", &rgb_path);
+  std::string rgb0_path, rgb1_path;
+  getParamOrFail(pnh, "rgb0_path", &rgb0_path);
+  getParamOrFail(pnh, "rgb1_path", &rgb1_path);
 
   std::string depth_path;
   getParamOrFail(pnh, "depth_path", &depth_path);
@@ -640,7 +642,8 @@ int main(int argc, char *argv[]) {
    = std::make_shared<ros_sensor_streams::
           ASLRGBDOfflineStream>(pnh,
                                 pose_path,
-                                rgb_path,
+                                rgb0_path,
+                                rgb1_path,
                                 depth_path,
                                 "camera",
                                 camera_world_frame_id_,
@@ -648,32 +651,38 @@ int main(int argc, char *argv[]) {
                                 world_frame);;
 
    int num_imgs = 0;
-  flame_ros::FlameOffline node(pnh, input->K(), input->width(), input->height());
+  flame_ros::FlameOffline node(pnh, input->K1(),
+          input->width(), input->height());
+
+
   /*==================== Enter main loop ====================*/
   ros::Rate ros_rate(30);
 
   while (ros::ok() && !input->empty()) {
     uint32_t img_id;
     double time;
-    cv::Mat3b rgb;
+    cv::Mat3b rgb0, rgb1;
     cv::Mat1f depth;
-    Eigen::Quaterniond q;
-    Eigen::Vector3d t;
-    input->get(&img_id, &time, &rgb, &depth, &q, &t);
+    Eigen::Quaterniond q0, q1;
+    Eigen::Vector3d t0, t1;
+    input->get(&img_id, &time, &rgb0, &rgb1, &depth, &q0, &t0, &q1, &t1);
 
 
     if (num_imgs % 1 == 0) {
       // Eat data.
       Eigen::Isometry3d eigen_pose = Eigen::Isometry3d::Identity();
-      eigen_pose.linear() = q.toRotationMatrix();
-      eigen_pose.translation() = t;
+      eigen_pose.linear() = q1.toRotationMatrix();
+      eigen_pose.translation() = t1;
       okvis::kinematics::Transformation pose(eigen_pose.matrix());
 
 
       okvis::Time ts(time);
       node.processFrame(img_id, ts, pose,
-                   rgb, depth);
+                   rgb1, depth);
     }
+//
+//    cv::imshow("rgb0", rgb0);
+//    cv::waitKey(1);
 
     /*==================== Timing stuff ====================*/
     // Compute two measures of throughput in Hz. The first is the actual number of

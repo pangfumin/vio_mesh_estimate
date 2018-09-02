@@ -3,7 +3,11 @@
   <arg name="load_params" default="true" />
   <arg name="param_file" default="flame_offline_asl.yaml" />
 
+
   <arg name="bag_data" default="false" />
+
+  <node name="rvizvisualisation" pkg="rviz" type="rviz" output="log" args="-d $(find depth_mesh)/config/flame.rviz" />
+
 
   <!-- frames -->
   <include file="$(find depth_mesh)/launch/frames.launch" />
