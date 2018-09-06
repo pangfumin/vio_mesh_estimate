@@ -1187,613 +1187,767 @@ bool Flame::updateFeatureIDepths(const Params& params,
                                  std::vector<FeatureWithIDepth>* feats,
                                  utils::StatsTracker* stats,
                                  Image3b* debug_img) {
-  stats->tick("update_idepths");
+    stats->tick("update_idepths");
 
-  int debug_feature_radius = 4 * fnew.img[0].cols / 320; // For drawing features.
+    int debug_feature_radius = 4 * fnew.img[0].cols / 320; // For drawing features.
 
-  if (params.debug_draw_matches) {
-    cv::cvtColor(fnew.img[0], *debug_img, cv::COLOR_GRAY2RGB);
-  }
-
-  bool success = false;
-  int num_total_updates = 0;
-
-  // Count failure types
-  std::atomic<int> num_fail_max_var(0);
-  std::atomic<int> num_fail_max_dropouts(0);
-  std::atomic<int> num_ref_patch(0);
-  std::atomic<int> num_amb_match(0);
-  std::atomic<int> num_max_cost(0);
-//
-//  std::vector<cv::KeyPoint> kp_curr_pf, kp_new;
-  Image3b colorCurr_pf, colorNew_left, colorNew_right;
-//  cv::cvtColor(curr_pf.img[0], colorCurr_pf, CV_GRAY2BGR);
-//  cv::cvtColor(fnew.img[0], colorNew_left, CV_GRAY2BGR);
-  cv::cvtColor(fnew_right.img[0], colorNew_right, CV_GRAY2BGR);
-//
-  std::vector<std::pair<Point2f , Point2f >> flow_pairs;
-
-
-// #pragma omp parallel for num_threads(params.omp_num_threads) schedule(static, params.omp_chunk_size) // NOLINT
-  for (int ii = 0; ii < feats->size(); ++ii) {
-    FeatureWithIDepth& fii = (*feats)[ii];
-
-    bool update_left_success = true;
-    bool update_right_success = true;
-    cv::Point2f left_flow, right_flow;
-
-
-
-    stereo::EpipolarGeometry<float> epigeo(K0, K0inv, K0, K0inv);
-    // Load geometry.
-    okvis::kinematics::Transformation T_ref_to_new = fnew.pose.inverse() * pfs.at(fii.frame_id)->pose;
-    okvis::kinematics::Transformation T_new_to_ref = pfs.at(fii.frame_id)->pose.inverse() * fnew.pose;
-    epigeo.loadGeometry(T_ref_to_new.hamilton_quaternion().cast<float>(),
-                        T_ref_to_new.r().cast<float>());
-
-    // Check baseline.
-    float baseline = T_ref_to_new.r().norm();
-    if (baseline < params.min_baseline) {
-      // Not enough baseline. Skip.
-      update_left_success = false;
+    if (params.debug_draw_matches) {
+        cv::cvtColor(fnew.img[0], *debug_img, cv::COLOR_GRAY2RGB);
     }
 
-    /*==================== Track feature in new image ====================*/
-    if (update_left_success) {
-      float residual;
-      bool track_success = trackFeature(params,
-                                        pfs, epigeo, fnew,
-                                        curr_pf, &fii, &left_flow, &residual,
-                                        debug_img);
+    bool left_success = false;
+    bool right_success = false;
+    int num_total_updates = 0;
 
+    // Count failure types
+    std::atomic<int> num_fail_max_var(0);
+    std::atomic<int> num_fail_max_dropouts(0);
+    std::atomic<int> num_ref_patch(0);
+    std::atomic<int> num_amb_match(0);
+    std::atomic<int> num_max_cost(0);
 
+    // Debug for right image update
+    int left_update_cnt = 0;
+    int right_update_cnt = 0;
+    std::vector<cv::KeyPoint> kp_curr_pf, kp_new;
+    Image3b colorCurr_pf, colorNew_left, colorNew_right;
+    cv::cvtColor(curr_pf.img[0], colorCurr_pf, CV_GRAY2BGR);
+    cv::cvtColor(fnew.img[0], colorNew_left, CV_GRAY2BGR);
+    cv::cvtColor(fnew_right.img[0], colorNew_right, CV_GRAY2BGR);
 
-      // Count failure types.
-      if (fii.search_status == stereo::inverse_depth_filter::Status::FAIL_REF_PATCH_GRADIENT) {
-        ++num_ref_patch;
-      } else if (fii.search_status == stereo::inverse_depth_filter::Status::FAIL_AMBIGUOUS_MATCH) {
-        ++num_amb_match;
-      } else if (fii.search_status == stereo::inverse_depth_filter::Status::FAIL_MAX_COST) {
-        ++num_max_cost;
-      } else {
-        // Unknown status.
-      }
+    std::vector<std::pair<Point2f , Point2f >> flow_pairs;
 
-      if (!track_success) {
-        fii.idepth_var *= params.fparams.process_fail_var_factor;
-        if (fii.idepth_var > params.idepth_var_max) {
-          fii.valid = false;
-          ++num_fail_max_var;
+//#pragma omp parallel for num_threads(params.omp_num_threads) schedule(static, params.omp_chunk_size) // NOLINT
+    for (int ii = 0; ii < feats->size(); ++ii) {
+        FeatureWithIDepth& fii = (*feats)[ii];
 
-          if (params.debug_draw_matches) {
-            cv::Scalar color(0, 255, 0); // Green for max var.
-            float blah;
-            cv::Point2f fii_cmp;
-            epigeo.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-            cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-                       debug_feature_radius, color);
-          }
+        if ( fii.frame_id == curr_pf.id) {
+            cv::KeyPoint kp;
+            kp.pt = fii.xy;
+            kp_curr_pf.push_back(kp);
         }
 
-        fii.num_dropouts++;
-        if (fii.num_dropouts > params.max_dropouts) {
-          fii.valid = false;
-          ++num_fail_max_dropouts;
 
-          if (params.debug_draw_matches) {
-            cv::Scalar color(255, 0, 0); // Blue for max dropouts.
-            float blah;
-            cv::Point2f fii_cmp;
-            epigeo.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-            cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-                       debug_feature_radius, color);
-          }
+        bool left_update_success = false;
+        bool right_update_success = false;
+
+        /**
+         *  Update Using Left Image
+         */
+        stereo::EpipolarGeometry<float> epigeo_left(K0, K0inv, K0, K0inv);
+        // Load geometry.
+        okvis::kinematics::Transformation T_ref_to_new = fnew.pose.inverse() * pfs.at(fii.frame_id)->pose;
+        okvis::kinematics::Transformation T_new_to_ref = pfs.at(fii.frame_id)->pose.inverse() * fnew.pose;
+        epigeo_left.loadGeometry(T_ref_to_new.hamilton_quaternion().cast<float>(),
+                                 T_ref_to_new.r().cast<float>());
+
+        bool go_on_left = true;
+
+        // Check baseline.
+        float baseline = T_ref_to_new.r().cast<float>().norm();
+        if (baseline < params.min_baseline) {
+            // Not enough baseline. Skip.
+            go_on_left = false;
         }
 
-        update_left_success = false;
-      }
+
+
+        /*==================== Track feature in new image ====================*/
+        cv::Point2f left_flow;
+        if (go_on_left) {
+            float residual;
+            bool track_success = trackFeature(params, K0, K0inv, pfs, epigeo_left, fnew,
+                                              curr_pf, &fii, &left_flow, &residual,
+                                              debug_img);
+
+
+            // Count failure types.
+            if (fii.search_status == stereo::inverse_depth_filter::Status::FAIL_REF_PATCH_GRADIENT) {
+                ++num_ref_patch;
+            } else if (fii.search_status == stereo::inverse_depth_filter::Status::FAIL_AMBIGUOUS_MATCH) {
+                ++num_amb_match;
+            } else if (fii.search_status == stereo::inverse_depth_filter::Status::FAIL_MAX_COST) {
+                ++num_max_cost;
+            } else {
+                // Unknown status.
+            }
+
+            if (!track_success) {
+                fii.idepth_var *= params.fparams.process_fail_var_factor;
+                if (fii.idepth_var > params.idepth_var_max) {
+                    fii.valid = false;
+                    ++num_fail_max_var;
+
+                    if (params.debug_draw_matches) {
+                        cv::Scalar color(0, 255, 0); // Green for max var.
+                        float blah;
+                        cv::Point2f fii_cmp;
+                        epigeo_left.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
+                        cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
+                                   debug_feature_radius, color);
+                    }
+                }
+
+                fii.num_dropouts++;
+                if (fii.num_dropouts > params.max_dropouts) {
+                    fii.valid = false;
+                    ++num_fail_max_dropouts;
+
+                    if (params.debug_draw_matches) {
+                        cv::Scalar color(255, 0, 0); // Blue for max dropouts.
+                        float blah;
+                        cv::Point2f fii_cmp;
+                        epigeo_left.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
+                        cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
+                                   debug_feature_radius, color);
+                    }
+                }
+
+                go_on_left = false;
+            }
+        }
+
+
+        /*==================== Update idepth ====================*/
+        // Load stuff into meas model.
+        float mu_meas_left, var_meas_left;
+        if (go_on_left) {
+            stereo::InverseDepthMeasModel model(K0, K0inv, K0, K0inv, params.zparams);
+            auto& pfii = pfs.at(fii.frame_id);
+            model.loadGeometry(pfii->pose, fnew.pose);
+            model.loadPaddedImages(pfii->img_pad[0], fnew.img_pad[0],
+                                   pfii->gradx_pad[0],
+                                   pfii->grady_pad[0],
+                                   fnew.gradx_pad[0], fnew.grady_pad[0]);
+
+            // Generate measurement.
+
+            bool sense_success = model.idepth(fii.xy, left_flow, &mu_meas_left, &var_meas_left);
+
+            if (!sense_success) {
+                if (!params.debug_quiet && params.debug_print_verbose_errors) {
+                    fprintf(stderr, "FAIL:Sense: u_ref = (%f, %f), id = %f, var = %f\n",
+                            fii.xy.x, fii.xy.y, fii.idepth_mu, fii.idepth_var);
+                }
+
+                cv::Scalar color;
+                fii.idepth_var *= params.fparams.process_fail_var_factor;
+                if (fii.idepth_var > params.idepth_var_max) {
+                    fii.valid = false;
+                    ++num_fail_max_var;
+
+
+                    if (params.debug_draw_matches) {
+                        cv::Scalar color(0, 255, 0); // Green for max var.
+                        float blah;
+                        cv::Point2f fii_cmp;
+                        epigeo_left.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
+                        cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
+                                   debug_feature_radius, color);
+                    }
+                }
+
+                fii.num_dropouts++;
+                if (fii.num_dropouts > params.max_dropouts) {
+                    fii.valid = false;
+                    ++num_fail_max_dropouts;
+
+                    if (params.debug_draw_matches) {
+                        cv::Scalar color(255, 0, 0); // Blue for max dropouts.
+                        float blah;
+                        cv::Point2f fii_cmp;
+                        epigeo_left.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
+                        cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
+                                   debug_feature_radius, color);
+                    }
+                }
+                go_on_left = false;
+
+            }
+        }
+
+
+        // Fuse.
+        float mu_post_left, var_post_left;
+        if (go_on_left) {
+            bool fuse_success =
+                    stereo::inverse_depth_filter::update(fii.idepth_mu,
+                                                         fii.idepth_var,
+                                                         mu_meas_left, var_meas_left,
+                                                         &mu_post_left, &var_post_left,
+                                                         params.outlier_sigma_thresh);
+
+            if (!fuse_success) {
+                if (!params.debug_quiet && params.debug_print_verbose_errors) {
+                    fprintf(stderr, "FAIL:Fuse: mu_meas = %f, var_meas = %f\n",
+                            mu_meas_left, var_meas_left);
+                }
+
+                cv::Scalar color;
+                fii.idepth_var *= params.fparams.process_fail_var_factor;
+                if (fii.idepth_var > params.idepth_var_max) {
+                    fii.valid = false;
+                    ++num_fail_max_var;
+
+                    if (params.debug_draw_matches) {
+                        cv::Scalar color(0, 255, 0); // Green for max var.
+                        float blah;
+                        cv::Point2f fii_cmp;
+                        epigeo_left.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
+                        cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
+                                   debug_feature_radius, color);
+                    }
+                }
+
+                fii.num_dropouts++;
+                if (fii.num_dropouts > params.max_dropouts) {
+                    fii.valid = false;
+                    ++num_fail_max_dropouts;
+
+                    if (params.debug_draw_matches) {
+                        cv::Scalar color(255, 0, 0); // Blue for max dropouts.
+                        float blah;
+                        cv::Point2f fii_cmp;
+                        epigeo_left.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
+                        cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
+                                   debug_feature_radius, color);
+                    }
+                }
+
+                go_on_left = false;
+            }
+        }
+
+        // update
+        if (go_on_left) {
+            if (params.do_meas_fusion) {
+                fii.idepth_mu = mu_post_left;
+                fii.idepth_var = var_post_left;
+            } else {
+                fii.idepth_mu = mu_meas_left;
+                fii.idepth_var = var_meas_left;
+            }
+
+            fii.valid = true;
+            fii.num_updates++;
+            fii.num_dropouts = 0;
+            num_total_updates++;
+
+            left_success = true;
+            left_update_success = true;
+            left_update_cnt ++;
+
+
+            // todo(pang): add observation into estimator
+        }
+
+        /**
+       *  Update Using Right Image
+       */
+
+        if (! params.update_using_right_frame) continue;
+
+        stereo::EpipolarGeometry<float> epigeo_right(K0, K0inv, K1, K1inv);
+        // Load geometry.
+        okvis::kinematics::Transformation T_ref_to_right = fnew_right.pose.inverse() * pfs.at(fii.frame_id)->pose;
+        okvis::kinematics::Transformation T_right_to_ref = pfs.at(fii.frame_id)->pose.inverse() * fnew_right.pose;
+        epigeo_right.loadGeometry(T_ref_to_right.hamilton_quaternion().cast<float>(),
+                                  T_ref_to_right.r().cast<float>());
+
+        /*==================== Track feature in new image ====================*/
+        cv::Point2f right_flow;
+        float residual;
+        bool track_success = trackFeatureRight(params, K0, K0inv, K1, K1inv, pfs,
+                                               epigeo_right, fnew_right,
+                                               curr_pf, &fii, &right_flow,
+                                               &residual,
+                                               &colorNew_right);
+
+        if (track_success) {
+
+        } else {
+            continue;
+        }
+
+        // todo: enssential matrix check
+
+        /*==================== Update idepth ====================*/
+        // Load stuff into meas model.
+        stereo::InverseDepthMeasModel model(K0, K0inv, K1, K1inv, params.zparams);
+        auto& pfii = pfs.at(fii.frame_id);
+        model.loadGeometry(pfii->pose, fnew_right.pose);
+        model.loadPaddedImages(pfii->img_pad[0], fnew_right.img_pad[0],
+                               pfii->gradx_pad[0],
+                               pfii->grady_pad[0],
+                               fnew_right.gradx_pad[0], fnew_right.grady_pad[0]);
+
+        // Generate measurement.
+        float mu_meas_right, var_meas_right;
+        bool sense_success = model.idepth(fii.xy, right_flow, &mu_meas_right, &var_meas_right);
+
+        if (!sense_success) {
+            continue;
+        }
+
+        // Fuse.
+        float mu_post_right, var_post_right;
+        bool fuse_success =
+                stereo::inverse_depth_filter::update(fii.idepth_mu,
+                                                     fii.idepth_var,
+                                                     mu_meas_right, var_meas_right,
+                                                     &mu_post_right, &var_post_right,
+                                                     params.outlier_sigma_thresh);
+
+        if (!fuse_success) {
+            continue;
+        }
+
+        if (params.do_meas_fusion) {
+            fii.idepth_mu = mu_post_right;
+            fii.idepth_var = var_post_right;
+        } else {
+            fii.idepth_mu = mu_meas_right;
+            fii.idepth_var = var_meas_right;
+        }
+
+        fii.valid = true;
+        fii.num_updates++;
+        fii.num_dropouts = 0;
+
+        right_success = true;
+        right_update_success = true;
+        right_update_cnt ++;
+
+
+        // todo(pang): add observation into estimator
+
+
+
+        if (left_update_success && right_update_success) {
+            std::pair<Point2f , Point2f > flow_pair(left_flow, right_flow);
+            flow_pairs.push_back(flow_pair);
+        }
+    }
+
+    // Fill in some stats.
+    stats->set("num_idepth_updates", num_total_updates);
+    stats->set("num_fail_max_var", num_fail_max_var.load());
+    stats->set("num_fail_max_dropouts", num_fail_max_dropouts.load());
+    stats->set("num_fail_ref_patch_grad", num_ref_patch.load());
+    stats->set("num_fail_ambiguous_match", num_amb_match.load());
+    stats->set("num_fail_max_cost", num_max_cost.load());
+
+    if (params.debug_draw_matches) {
+        if (params.debug_flip_images) {
+            // Flip image for display.
+            cv::flip(*debug_img, *debug_img, -1);
+        }
+
+        if (params.debug_draw_text_overlay) {
+            // Print some info.
+            char buf[200];
+            snprintf(buf, sizeof(buf), "%i updates, %i fails (%i ref_patch_grad, %i, amb_match, %i max_cost)",
+                     num_total_updates, feats->size() - num_total_updates,
+                     num_ref_patch.load(), num_amb_match.load(), num_max_cost.load());
+            float font_scale = 0.6 / (640.0f / debug_img->cols);
+            int font_thickness = 2.0f / (640.0f / debug_img->cols) + 0.5f;
+            cv::putText(*debug_img, buf,
+                        cv::Point(10, debug_img->rows - 5),
+                        cv::FONT_HERSHEY_SIMPLEX, font_scale, cv::Scalar(200, 200, 250),
+                        font_thickness, 8);
+        }
+    }
+
+    stats->tock("update_idepths");
+    if (!params.debug_quiet && params.debug_print_timing_update_idepths) {
+        printf("Flame/update_idepths(%i) = %f ms\n",
+               feats->size(), stats->timings("update_idepths"));
     }
 
 
-    /*==================== Update idepth ====================*/
-    // Load stuff into meas model.
-    float left_mu_meas, left_var_meas;
-    if (update_left_success) {
-      stereo::InverseDepthMeasModel model(K0, K0inv, K0, K0inv, params.zparams);
-      auto& pfii = pfs.at(fii.frame_id);
-      model.loadGeometry(pfii->pose, fnew.pose);
-      model.loadPaddedImages(pfii->img_pad[0], fnew.img_pad[0],
-                             pfii->gradx_pad[0],
-                             pfii->grady_pad[0],
-                             fnew.gradx_pad[0], fnew.grady_pad[0]);
-
-      // Generate measurement.
-
-      bool sense_success = model.idepth(fii.xy, left_flow, &left_mu_meas, &left_var_meas);
-
-      if (!sense_success) {
-        if (!params.debug_quiet && params.debug_print_verbose_errors) {
-          fprintf(stderr, "FAIL:Sense: u_ref = (%f, %f), id = %f, var = %f\n",
-                  fii.xy.x, fii.xy.y, fii.idepth_mu, fii.idepth_var);
-        }
-
-        cv::Scalar color;
-        fii.idepth_var *= params.fparams.process_fail_var_factor;
-        if (fii.idepth_var > params.idepth_var_max) {
-          fii.valid = false;
-          ++num_fail_max_var;
+    cv::drawKeypoints(colorCurr_pf,kp_curr_pf,colorCurr_pf, cv::Scalar(225, 0,0 ));
+    ///cv::drawKeypoints(colorNew,kp_new,colorNew, cv::Scalar(0,225, 0 ));
 
 
-          if (params.debug_draw_matches) {
-            cv::Scalar color(0, 255, 0); // Green for max var.
-            float blah;
-            cv::Point2f fii_cmp;
-            epigeo.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-            cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-                       debug_feature_radius, color);
-          }
-        }
-
-        fii.num_dropouts++;
-        if (fii.num_dropouts > params.max_dropouts) {
-          fii.valid = false;
-          ++num_fail_max_dropouts;
-
-          if (params.debug_draw_matches) {
-            cv::Scalar color(255, 0, 0); // Blue for max dropouts.
-            float blah;
-            cv::Point2f fii_cmp;
-            epigeo.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-            cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-                       debug_feature_radius, color);
-          }
-        }
-
-        update_left_success = false;
-      }
-
+    for (auto pair :  flow_pairs) {
+        cv::circle(colorNew_left, pair.first, 1, cv::Scalar(255, 0, 0));
+        cv::circle(colorNew_left, pair.second, 1, cv::Scalar(0, 255, 0));
+        cv::line(colorNew_left, pair.first, pair.second, cv::Scalar(0, 0,255));
     }
 
-    // Fuse.
-    float left_mu_post, left_var_post;
-    if (update_left_success) {
-
-      bool fuse_success =
-              stereo::inverse_depth_filter::update(fii.idepth_mu,
-                                                   fii.idepth_var,
-                                                   left_mu_meas, left_var_meas,
-                                                   &left_mu_post, &left_var_post,
-                                                   params.outlier_sigma_thresh);
-
-      if (!fuse_success) {
-        if (!params.debug_quiet && params.debug_print_verbose_errors) {
-          fprintf(stderr, "FAIL:Fuse: mu_meas = %f, var_meas = %f\n",
-                  left_mu_meas, left_var_meas);
-        }
-
-        cv::Scalar color;
-        fii.idepth_var *= params.fparams.process_fail_var_factor;
-        if (fii.idepth_var > params.idepth_var_max) {
-          fii.valid = false;
-          ++num_fail_max_var;
-
-          if (params.debug_draw_matches) {
-            cv::Scalar color(0, 255, 0); // Green for max var.
-            float blah;
-            cv::Point2f fii_cmp;
-            epigeo.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-            cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-                       debug_feature_radius, color);
-          }
-        }
-
-        fii.num_dropouts++;
-        if (fii.num_dropouts > params.max_dropouts) {
-          fii.valid = false;
-          ++num_fail_max_dropouts;
-
-          if (params.debug_draw_matches) {
-            cv::Scalar color(255, 0, 0); // Blue for max dropouts.
-            float blah;
-            cv::Point2f fii_cmp;
-            epigeo.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-            cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-                       debug_feature_radius, color);
-          }
-        }
-
-        update_left_success = false ;
-      }
-    }
+    //cv::imshow("curr_pf", colorCurr_pf);
+    cv::imshow("fnew", 0.5*colorNew_left + 0.5*colorNew_right);
+    cv::imshow("fnew_right", colorNew_right);
+    cv::waitKey(2);
 
 
-    if (update_left_success) {
-      if (params.do_meas_fusion) {
-        fii.idepth_mu = left_mu_post;
-        fii.idepth_var = left_var_post;
-      } else {
-        fii.idepth_mu = left_mu_meas;
-        fii.idepth_var = left_var_meas;
-      }
 
-      fii.valid = true;
-      fii.num_updates++;
-      fii.num_dropouts = 0;
-      num_total_updates++;
-      success = true;
-    }
-
-    // update right
-    if (params.update_using_right_frame) {
-      stereo::EpipolarGeometry<float> epigeo_right(K0, K0inv, K1, K1inv);
-      // Load geometry.
-      okvis::kinematics::Transformation T_ref_to_new_right
-        = fnew_right.pose.inverse() * pfs.at(fii.frame_id)->pose;
-      okvis::kinematics::Transformation T_new_right_to_ref
-      = pfs.at(fii.frame_id)->pose.inverse() * fnew_right.pose;
-      epigeo_right.loadGeometry(T_ref_to_new_right.hamilton_quaternion().cast<float>(),
-                          T_ref_to_new_right.r().cast<float>());
-
-      float residual;
-      bool track_success = trackFeature(params,
-                                        pfs, epigeo_right, fnew_right,
-                                        curr_pf, &fii, &right_flow, &residual,
-                                        debug_img);
-
-
-      if (!track_success) {
-        update_right_success = false;
-      } else {
-        std::pair<cv::Point2f,cv::Point2f> pair = std::make_pair(right_flow, right_flow);
-         flow_pairs.push_back(pair);
-
-      }
-
-//      // Load stuff into meas model.
-//      float right_mu_meas, right_var_meas;
-//      if (update_right_success) {
-//        stereo::InverseDepthMeasModel model(K0, K0inv, K1, K1inv, params.zparams);
-//        auto &pfii = pfs.at(fii.frame_id);
-//        model.loadGeometry(pfii->pose, fnew_right.pose);
-//        model.loadPaddedImages(pfii->img_pad[0], fnew_right.img_pad[0],
-//                               pfii->gradx_pad[0],
-//                               pfii->grady_pad[0],
-//                               fnew_right.gradx_pad[0], fnew_right.grady_pad[0]);
-//
-//        // Generate measurement.
-//
-//        bool sense_success = model.idepth(fii.xy, right_flow, &right_mu_meas, &right_var_meas);
-//
-//        if (!sense_success) {
-//          if (!params.debug_quiet && params.debug_print_verbose_errors) {
-//            fprintf(stderr, "FAIL:Sense: u_ref = (%f, %f), id = %f, var = %f\n",
-//                    fii.xy.x, fii.xy.y, fii.idepth_mu, fii.idepth_var);
-//          }
-//
-//          cv::Scalar color;
-//          fii.idepth_var *= params.fparams.process_fail_var_factor;
-//          if (fii.idepth_var > params.idepth_var_max) {
-//            fii.valid = false;
-//            ++num_fail_max_var;
-//
-//
-//            if (params.debug_draw_matches) {
-//              cv::Scalar color(0, 255, 0); // Green for max var.
-//              float blah;
-//              cv::Point2f fii_cmp;
-//              epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-//              cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-//                         debug_feature_radius, color);
-//            }
-//          }
-//
-//          fii.num_dropouts++;
-//          if (fii.num_dropouts > params.max_dropouts) {
-//            fii.valid = false;
-//            ++num_fail_max_dropouts;
-//
-//            if (params.debug_draw_matches) {
-//              cv::Scalar color(255, 0, 0); // Blue for max dropouts.
-//              float blah;
-//              cv::Point2f fii_cmp;
-//              epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-//              cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-//                         debug_feature_radius, color);
-//            }
-//          }
-//
-//          update_right_success = false;
-//        }
-//      }
-//
-//
-//        // Fuse.
-//        float right_mu_post, right_var_post;
-//        if (update_right_success) {
-//
-//          bool fuse_success =
-//                  stereo::inverse_depth_filter::update(fii.idepth_mu,
-//                                                       fii.idepth_var,
-//                                                       right_mu_meas, right_var_meas,
-//                                                       &right_mu_post, &right_var_post,
-//                                                       params.outlier_sigma_thresh);
-//
-//          if (!fuse_success) {
-//            if (!params.debug_quiet && params.debug_print_verbose_errors) {
-//              fprintf(stderr, "FAIL:Fuse: mu_meas = %f, var_meas = %f\n",
-//                      right_mu_meas, right_var_meas);
-//            }
-//
-//            cv::Scalar color;
-//            fii.idepth_var *= params.fparams.process_fail_var_factor;
-//            if (fii.idepth_var > params.idepth_var_max) {
-//              fii.valid = false;
-//              ++num_fail_max_var;
-//
-//              if (params.debug_draw_matches) {
-//                cv::Scalar color(0, 255, 0); // Green for max var.
-//                float blah;
-//                cv::Point2f fii_cmp;
-//                epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-//                cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-//                           debug_feature_radius, color);
-//              }
-//            }
-//
-//            fii.num_dropouts++;
-//            if (fii.num_dropouts > params.max_dropouts) {
-//              fii.valid = false;
-//              ++num_fail_max_dropouts;
-//
-//              if (params.debug_draw_matches) {
-//                cv::Scalar color(255, 0, 0); // Blue for max dropouts.
-//                float blah;
-//                cv::Point2f fii_cmp;
-//                epigeo_right.project(fii.xy, fii.idepth_mu, &fii_cmp, &blah);
-//                cv::circle(*debug_img, cv::Point2i(fii_cmp.x + 0.5f, fii_cmp.y + 0.5f),
-//                           debug_feature_radius, color);
-//              }
-//            }
-//
-//            update_right_success = false ;
-//          }
-//        }
-//
-//
-//        if (update_right_success) {
-//          if (params.do_meas_fusion) {
-//            fii.idepth_mu = right_mu_post;
-//            fii.idepth_var = right_var_post;
-//          } else {
-//            fii.idepth_mu = right_mu_meas;
-//            fii.idepth_var = right_var_meas;
-//          }
-//
-//          fii.valid = true;
-//          fii.num_updates++;
-//          fii.num_dropouts = 0;
-//          num_total_updates++;
-//          success = true;
-//        }
-
-
-//      if (update_left_success && update_right_success) {
-//        std::pair<Point2f , Point2f > flow_pair(left_flow, right_flow);
-//        flow_pairs.push_back(flow_pair);
-//      }
-
-
-    }  //  End params.update_using_right_frame
-  }
-
-  // Fill in some stats.
-  stats->set("num_idepth_updates", num_total_updates);
-  stats->set("num_fail_max_var", num_fail_max_var.load());
-  stats->set("num_fail_max_dropouts", num_fail_max_dropouts.load());
-  stats->set("num_fail_ref_patch_grad", num_ref_patch.load());
-  stats->set("num_fail_ambiguous_match", num_amb_match.load());
-  stats->set("num_fail_max_cost", num_max_cost.load());
-
-  if (params.debug_draw_matches) {
-    if (params.debug_flip_images) {
-      // Flip image for display.
-      cv::flip(*debug_img, *debug_img, -1);
-    }
-
-    if (params.debug_draw_text_overlay) {
-      // Print some info.
-      char buf[200];
-      snprintf(buf, sizeof(buf), "%i updates, %i fails (%i ref_patch_grad, %i, amb_match, %i max_cost)",
-               num_total_updates, feats->size() - num_total_updates,
-               num_ref_patch.load(), num_amb_match.load(), num_max_cost.load());
-      float font_scale = 0.6 / (640.0f / debug_img->cols);
-      int font_thickness = 2.0f / (640.0f / debug_img->cols) + 0.5f;
-      cv::putText(*debug_img, buf,
-                  cv::Point(10, debug_img->rows - 5),
-                  cv::FONT_HERSHEY_SIMPLEX, font_scale, cv::Scalar(200, 200, 250),
-                  font_thickness, 8);
-    }
-  }
-
-  stats->tock("update_idepths");
-  if (!params.debug_quiet && params.debug_print_timing_update_idepths) {
-    printf("Flame/update_idepths(%i) = %f ms\n",
-           feats->size(), stats->timings("update_idepths"));
-  }
-
-//  cv::drawKeypoints(colorCurr_pf,kp_curr_pf,colorCurr_pf, cv::Scalar(225, 0,0 ));
-  ///cv::drawKeypoints(colorNew,kp_new,colorNew, cv::Scalar(0,225, 0 ));
-
-  std::cout<< "flow_pairs: " << flow_pairs.size() << std::endl;
-
-//
-//  //cv::imshow("curr_pf", colorCurr_pf);
-//  cv::imshow("fnew", 0.5*colorNew_left + 0.5*colorNew_right);
-//  cv::imshow("fnew_right", colorNew_right);
-//  cv::waitKey(1);
-
-
-  for (auto pair :  flow_pairs) {
-
-    std::cout<< pair.first.x <<" " <<  pair.first.y << std::endl;
-    cv::circle(colorNew_right, pair.first, 1, cv::Scalar(255, 0, 0));
-//    cv::circle(colorNew_left, pair.second, 1, cv::Scalar(0, 255, 0));
-//    cv::line(colorNew_left, pair.first, pair.second, cv::Scalar(0, 0,255));
-  }
-  cv::imshow("right", colorNew_right);
-  cv::waitKey(1);
-
-
-  return success;
+    return left_success || right_success;
 }
 
-bool Flame::trackFeature(const Params& params,
-                         const FrameIDToFrame& pfs,
-                         const stereo::EpipolarGeometry<float>& epigeo,
-                         const utils::Frame& fnew,
-                         const utils::Frame& curr_pf,
-                         FeatureWithIDepth* feat,
-                         cv::Point2f* flow,
-                         float* residual,
-                         Image3b* debug_img) {
-  int debug_feature_radius = fnew.img[0].cols / 320; // For drawing features.
-  cv::Point2i debug_feature_offset(debug_feature_radius, debug_feature_radius);
+    bool Flame::trackFeature(const Params& params,
+                             const Matrix3f& K,
+                             const Matrix3f& Kinv,
+                             const FrameIDToFrame& pfs,
+                             const stereo::EpipolarGeometry<float>& epigeo,
+                             const utils::Frame& fnew,
+                             const utils::Frame& curr_pf,
+                             FeatureWithIDepth* feat,
+                             cv::Point2f* flow,
+                             float* residual,
+                             Image3b* debug_img) {
+        int debug_feature_radius = fnew.img[0].cols / 320; // For drawing features.
+        cv::Point2i debug_feature_offset(debug_feature_radius, debug_feature_radius);
 
-  /*==================== Predict feature in new image ====================*/
-  cv::Point2f u_cmp;
-  float idepth_cmp, var_cmp;
-  bool pred_success =
-      stereo::inverse_depth_filter::predict(epigeo,
-                                            params.fparams.process_var_factor,
-                                            feat->xy,
-                                            feat->idepth_mu,
-                                            feat->idepth_var,
-                                            &u_cmp, &idepth_cmp, &var_cmp);
+        /*==================== Predict feature in new image ====================*/
+        cv::Point2f u_cmp;
+        float idepth_cmp, var_cmp;
+        bool pred_success =
+                stereo::inverse_depth_filter::predict(epigeo,
+                                                      params.fparams.process_var_factor,
+                                                      feat->xy,
+                                                      feat->idepth_mu,
+                                                      feat->idepth_var,
+                                                      &u_cmp, &idepth_cmp, &var_cmp);
 
-  if (!pred_success) {
-    // TOOD(wng): Dropout count.
-    return false;
-  }
-
-  /*==================== Use LSD-SLAM style direct search ====================*/
-  int width = fnew.img[0].cols;
-  int height = fnew.img[0].rows;
-
-  int row_offset = 0;
-  if (params.do_letterbox) {
-    // Only detect features in middle third of image.
-    row_offset = height/3;
-  }
-
-  int border = params.rescale_factor_max * params.fparams.win_size / 2 + 1;
-  cv::Rect valid_region(border, border + row_offset,
-                        width - 2*border, height - 2*border - 2*row_offset);
-
-  // Compute rescale factor. This is how much to grow/shrink the reference
-  // patch based on the difference in idepth between the reference and
-  // comparison frames (i.e. travel along the optical axis).
-  float rescale_factor = 1.0f;
-  if ((feat->idepth_mu > 0.0f) && (idepth_cmp > 0.0f)) {
-    rescale_factor = idepth_cmp / feat->idepth_mu;
-  }
-
-  FLAME_ASSERT(!std::isnan(rescale_factor));
-  FLAME_ASSERT(rescale_factor > 0);
-
-
-
-  cv::Point2f u_start, u_end, epi;
-  bool region_success =
-      stereo::inverse_depth_filter::getSearchRegion(params.fparams, epigeo,
-                                                    width, height, feat->xy,
-                                                    feat->idepth_mu, feat->idepth_var,
-                                                    &u_start, &u_end, &epi);
-  if (!region_success) {
-    if (params.debug_draw_matches) {
-      // Failed search region in black.
-      cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
-      cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
-                    u_cmpi + debug_feature_offset, cv::Scalar(0, 0, 0), -1);
-    }
-    return false;
-  }
-
-  int padding = (fnew.img_pad[0].rows - fnew.img[0].rows) / 2;
-  cv::Point2f offset(padding, padding);
-
-  if (!valid_region.contains(feat->xy)) {
-    if (!params.debug_quiet) {
-      printf("Flame[WARNING]: Feature outside bounds: feat->xy = %f, %f\n",
-             feat->xy.x, feat->xy.y);
-    }
-    return false;
-  }
-  // FLAME_ASSERT(valid_region.contains(feat->xy));
-
-  auto search_success =
-      stereo::inverse_depth_filter::search(params.fparams, epigeo, rescale_factor,
-                                           pfs.at(feat->frame_id)->img_pad[0],
-                                           fnew.img_pad[0],
-                                           feat->xy + offset, u_start + offset,
-                                           u_end + offset, &u_cmp);
-  feat->search_status = search_success;
-
-  // Parse output.
-  if (search_success != stereo::inverse_depth_filter::SUCCESS) {
-    if (params.debug_draw_matches) {
-      // Color failure by error status.
-      cv::Vec3b color;
-
-      if (search_success == stereo::inverse_depth_filter::FAIL_REF_PATCH_GRADIENT) {
-        color = cv::Vec3b(255, 255, 0); // Cyan.
-        if (feat->num_updates == 0) {
-          color = cv::Vec3b(255, 255, 255); // White.
+        if (!pred_success) {
+            // TOOD(wng): Dropout count.
+            return false;
         }
-      } else if (search_success == stereo::inverse_depth_filter::FAIL_AMBIGUOUS_MATCH) {
-        color = cv::Vec3b(0, 0, 255); // Red.
-      } else if (search_success == stereo::inverse_depth_filter::FAIL_MAX_COST) {
-        color = cv::Vec3b(0, 255, 255); // Yellow.
-      } else if (search_success != stereo::inverse_depth_filter::SUCCESS) {
-        fprintf(stderr, "inverse_depth_filter::search: Unrecognized status!\n");
-        FLAME_ASSERT(false);
-        return false;
-      }
 
-      cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
-      cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
-                    u_cmpi + debug_feature_offset,
-                    cv::Scalar(color[0], color[1], color[2]), -1);
+        /*==================== Use LSD-SLAM style direct search ====================*/
+        int width = fnew.img[0].cols;
+        int height = fnew.img[0].rows;
 
-      auto colormap = [&color](float a) { return color; };
-      utils::applyColorMapLine(u_start, u_end, 1, 1, colormap, 0.5, debug_img);
+        int row_offset = 0;
+        if (params.do_letterbox) {
+            // Only detect features in middle third of image.
+            row_offset = height/3;
+        }
+
+        int border = params.rescale_factor_max * params.fparams.win_size / 2 + 1;
+        cv::Rect valid_region(border, border + row_offset,
+                              width - 2*border, height - 2*border - 2*row_offset);
+
+        // Compute rescale factor. This is how much to grow/shrink the reference
+        // patch based on the difference in idepth between the reference and
+        // comparison frames (i.e. travel along the optical axis).
+        float rescale_factor = 1.0f;
+        if ((feat->idepth_mu > 0.0f) && (idepth_cmp > 0.0f)) {
+            rescale_factor = idepth_cmp / feat->idepth_mu;
+        }
+
+        FLAME_ASSERT(!std::isnan(rescale_factor));
+        FLAME_ASSERT(rescale_factor > 0);
+
+        if ((rescale_factor <= params.rescale_factor_min) ||
+            (rescale_factor >= params.rescale_factor_max)) {
+            // Warp on reference patch is too large - i.e. idepth difference between
+            // reference frame and comparison frame is too large. Move the feature to
+            // the most recent pf.
+            bool verbose = false;
+            if (verbose) {
+                fprintf(stderr, "Flame[FAIL]: bad rescale_factor = %f, prior_idepth = %f, idepth_cmp = %f\n",
+                        rescale_factor, feat->idepth_mu, idepth_cmp);
+            }
+
+            if (verbose) {
+                fprintf(stderr, "Flame[WARNING]: Moving feature from u_ref = (%f, %f) idepth = %f to u_cmp = (%f, %f) idepth = %f\n",
+                        feat->xy.x, feat->xy.y, feat->idepth_mu,
+                        u_cmp.x, u_cmp.y, idepth_cmp);
+            }
+
+            // If this feature has converged already, move it so that it's parent
+            // pose is the most recent poseframe frame rather than throw it away.
+            stereo::EpipolarGeometry<float> epipf(K, Kinv, K, Kinv);
+            okvis::kinematics::Transformation T_old_to_new = curr_pf.pose.inverse() * pfs.at(feat->frame_id)->pose;
+            epipf.loadGeometry(T_old_to_new.hamilton_quaternion().cast<float>(),
+                               T_old_to_new.r().cast<float>());
+
+            cv::Point2f u_pf;
+            float idepth_pf, var_pf;
+            bool move_success =
+                    stereo::inverse_depth_filter::predict(epipf,
+                                                          params.fparams.process_var_factor,
+                                                          feat->xy,
+                                                          feat->idepth_mu,
+                                                          feat->idepth_var,
+                                                          &u_pf, &idepth_pf, &var_pf);
+            if (!move_success || !valid_region.contains(u_pf)) {
+                feat->valid = false;
+                if (params.debug_draw_matches) {
+                    // Failed move in brown.
+                    cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
+                    cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
+                                  u_cmpi + debug_feature_offset, cv::Scalar(0, 51, 102), -1);
+                }
+                return false;
+            }
+
+            feat->frame_id = curr_pf.id;
+            feat->xy = u_pf;
+            float old_idepth = feat->idepth_mu;
+            feat->idepth_mu = idepth_pf;
+
+            // Project idepth variance.
+            float var_factor4 = idepth_pf / old_idepth;
+            var_factor4 *= var_factor4;
+            var_factor4 *= var_factor4;
+
+            if (idepth_pf < 1e-6) {
+                // If feat_ref.idepth_mu == 0, then var_factor4 is inf.
+                var_factor4 = 1;
+            }
+            feat->idepth_var *= var_factor4;
+
+            if (params.debug_draw_matches) {
+                // Successful move in magenta.
+                cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
+                cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
+                              u_cmpi + debug_feature_offset, cv::Scalar(255, 0, 255), -1);
+            }
+
+            return false;
+        }
+
+        cv::Point2f u_start, u_end, epi;
+        bool region_success =
+                stereo::inverse_depth_filter::getSearchRegion(params.fparams, epigeo,
+                                                              width, height, feat->xy,
+                                                              feat->idepth_mu, feat->idepth_var,
+                                                              &u_start, &u_end, &epi);
+        if (!region_success) {
+            if (params.debug_draw_matches) {
+                // Failed search region in black.
+                cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
+                cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
+                              u_cmpi + debug_feature_offset, cv::Scalar(0, 0, 0), -1);
+            }
+            return false;
+        }
+
+        int padding = (fnew.img_pad[0].rows - fnew.img[0].rows) / 2;
+        cv::Point2f offset(padding, padding);
+
+        if (!valid_region.contains(feat->xy)) {
+            if (!params.debug_quiet) {
+                printf("Flame[WARNING]: Feature outside bounds: feat->xy = %f, %f\n",
+                       feat->xy.x, feat->xy.y);
+            }
+            return false;
+        }
+        // FLAME_ASSERT(valid_region.contains(feat->xy));
+
+        auto search_success =
+                stereo::inverse_depth_filter::search(params.fparams, epigeo, rescale_factor,
+                                                     pfs.at(feat->frame_id)->img_pad[0],
+                                                     fnew.img_pad[0],
+                                                     feat->xy + offset, u_start + offset,
+                                                     u_end + offset, &u_cmp);
+        feat->search_status = search_success;
+
+        // Parse output.
+        if (search_success != stereo::inverse_depth_filter::SUCCESS) {
+            if (params.debug_draw_matches) {
+                // Color failure by error status.
+                cv::Vec3b color;
+
+                if (search_success == stereo::inverse_depth_filter::FAIL_REF_PATCH_GRADIENT) {
+                    color = cv::Vec3b(255, 255, 0); // Cyan.
+                    if (feat->num_updates == 0) {
+                        color = cv::Vec3b(255, 255, 255); // White.
+                    }
+                } else if (search_success == stereo::inverse_depth_filter::FAIL_AMBIGUOUS_MATCH) {
+                    color = cv::Vec3b(0, 0, 255); // Red.
+                } else if (search_success == stereo::inverse_depth_filter::FAIL_MAX_COST) {
+                    color = cv::Vec3b(0, 255, 255); // Yellow.
+                } else if (search_success != stereo::inverse_depth_filter::SUCCESS) {
+                    fprintf(stderr, "inverse_depth_filter::search: Unrecognized status!\n");
+                    FLAME_ASSERT(false);
+                    return false;
+                }
+
+                cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
+                cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
+                              u_cmpi + debug_feature_offset,
+                              cv::Scalar(color[0], color[1], color[2]), -1);
+
+                auto colormap = [&color](float a) { return color; };
+                utils::applyColorMapLine(u_start, u_end, 1, 1, colormap, 0.5, debug_img);
+            }
+
+            return false;
+        }
+
+        *flow = u_cmp - offset;
+
+        // if (params.debug_draw_matches) {
+        //   cv::Point2i flowi(flow->x + 0.5f, flow->y + 0.5f);
+        //   // cv::circle(*debug_img, cv::Point2i(flow->x + 0.5f, flow->y + 0.5f),
+        //   //            2, cv::Scalar(0, 255, 0));
+
+        //   // cv::Vec3b color(0, 255, 0);
+
+        //   cv::Vec3b color = utils::blendColor(cv::Vec3b(255, 0, 0),
+        //                                       cv::Vec3b(0, 255, 0),
+        //                                       feat->num_updates, 0, 30);
+        //   // cv::Vec3b color = utils::jet(feat->num_updates, 0, 30);
+        //   cv::rectangle(*debug_img, flowi - debug_feature_offset,
+        //                 flowi + debug_feature_offset,
+        //                 cv::Scalar(color[0], color[1], color[2]), -1);
+
+        //   auto colormap = [&color](float a) { return color; };
+        //   utils::applyColorMapLine(u_start, u_end, 1, 1, colormap, 0.5, debug_img);
+        // }
+
+        return true;
     }
 
-    return false;
-  }
+    bool Flame::trackFeatureRight(const Params& params,
+                                  const Matrix3f& K0,
+                                  const Matrix3f& K0inv,
+                                  const Matrix3f& K1,
+                                  const Matrix3f& K1inv,
+                                  const FrameIDToFrame& pfs,
+                                  const stereo::EpipolarGeometry<float>& epigeo,
+                                  const utils::Frame& fnew,
+                                  const utils::Frame& curr_pf,
+                                  FeatureWithIDepth* feat,
+                                  cv::Point2f* flow,
+                                  float* residual,
+                                  Image3b* debug_img) {
+        int debug_feature_radius = fnew.img[0].cols / 320; // For drawing features.
+        cv::Point2i debug_feature_offset(debug_feature_radius, debug_feature_radius);
 
-  *flow = u_cmp - offset;
+        /*==================== Predict feature in new image ====================*/
 
-  // if (params.debug_draw_matches) {
-  //   cv::Point2i flowi(flow->x + 0.5f, flow->y + 0.5f);
-  //   // cv::circle(*debug_img, cv::Point2i(flow->x + 0.5f, flow->y + 0.5f),
-  //   //            2, cv::Scalar(0, 255, 0));
+        cv::Point2f u_cmp;
+        float idepth_cmp, var_cmp;
+        bool pred_success =
+                stereo::inverse_depth_filter::predict(epigeo,
+                                                      params.fparams.process_var_factor,
+                                                      feat->xy,
+                                                      feat->idepth_mu,
+                                                      feat->idepth_var,
+                                                      &u_cmp, &idepth_cmp, &var_cmp);
+        if (!pred_success) {
+            //std::cout<< "right predict failure" << std::endl;
+            return false;
+        }
 
-  //   // cv::Vec3b color(0, 255, 0);
+        if (feat->frame_id == curr_pf.id) {
+//    std::vector<cv::KeyPoint> kps;
+//    cv::KeyPoint kp; kp.pt = u_cmp; kps.push_back(kp);
+//    cv::drawKeypoints(*debug_img, kps, *debug_img, cv::Scalar(225, 0,0));
+        }
 
-  //   cv::Vec3b color = utils::blendColor(cv::Vec3b(255, 0, 0),
-  //                                       cv::Vec3b(0, 255, 0),
-  //                                       feat->num_updates, 0, 30);
-  //   // cv::Vec3b color = utils::jet(feat->num_updates, 0, 30);
-  //   cv::rectangle(*debug_img, flowi - debug_feature_offset,
-  //                 flowi + debug_feature_offset,
-  //                 cv::Scalar(color[0], color[1], color[2]), -1);
 
-  //   auto colormap = [&color](float a) { return color; };
-  //   utils::applyColorMapLine(u_start, u_end, 1, 1, colormap, 0.5, debug_img);
-  // }
 
-  return true;
-}
+        float rescale_factor = 1.0f;
+        if ((feat->idepth_mu > 0.0f) && (idepth_cmp > 0.0f)) {
+            rescale_factor = idepth_cmp / feat->idepth_mu;
+        }
+
+        /*==================== Use LSD-SLAM style direct search ====================*/
+        int width = fnew.img[0].cols;
+        int height = fnew.img[0].rows;
+
+        int row_offset = 0;
+        if (params.do_letterbox) {
+            // Only detect features in middle third of image.
+            row_offset = height/3;
+        }
+
+        int border = params.rescale_factor_max * params.fparams.win_size / 2 + 1;
+        cv::Rect valid_region(border, border + row_offset,
+                              width - 2*border, height - 2*border - 2*row_offset);
+
+
+
+        cv::Point2f u_start, u_end, epi;
+        bool region_success =
+                stereo::inverse_depth_filter::getSearchRegion(params.fparams, epigeo,
+                                                              width, height, feat->xy,
+                                                              feat->idepth_mu, feat->idepth_var,
+                                                              &u_start, &u_end, &epi);
+
+
+        if (region_success) {
+//    if (feat->frame_id == curr_pf.id) {
+//      cv::line(*debug_img, u_start, u_end, cv::Scalar(33,54,234));
+//    }
+        }else{
+            // Failed search region in black.
+            cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
+            cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
+                          u_cmpi + debug_feature_offset, cv::Scalar(45, 233, 0), -1);
+            return false;
+        }
+
+        int padding = (fnew.img_pad[0].rows - fnew.img[0].rows) / 2;
+        cv::Point2f offset(padding, padding);
+
+        if (!valid_region.contains(feat->xy)) {
+            if (!params.debug_quiet) {
+                printf("Flame[WARNING]: Feature outside bounds: feat->xy = %f, %f\n",
+                       feat->xy.x, feat->xy.y);
+            }
+            return false;
+        }
+        // FLAME_ASSERT(valid_region.contains(feat->xy));
+
+        auto search_success =
+                stereo::inverse_depth_filter::search(params.fparams, epigeo, rescale_factor,
+                                                     pfs.at(feat->frame_id)->img_pad[0],
+                                                     fnew.img_pad[0],
+                                                     feat->xy + offset, u_start + offset,
+                                                     u_end + offset, &u_cmp);
+        feat->search_status = search_success;
+
+        // Parse output.
+        if (search_success == stereo::inverse_depth_filter::SUCCESS) {
+//    if (feat->frame_id == curr_pf.id) {
+//      std::vector<cv::KeyPoint> kps;
+//      cv::KeyPoint kp; kp.pt = u_cmp; kps.push_back(kp);
+//      cv::drawKeypoints(*debug_img, kps, *debug_img, cv::Scalar(0,255,0));
+//    }
+
+        }else{
+
+            // Color failure by error status.
+            cv::Vec3b color;
+
+            if (search_success == stereo::inverse_depth_filter::FAIL_REF_PATCH_GRADIENT) {
+                color = cv::Vec3b(255, 255, 0); // Cyan.
+                if (feat->num_updates == 0) {
+                    color = cv::Vec3b(255, 255, 255); // White.
+                }
+            } else if (search_success == stereo::inverse_depth_filter::FAIL_AMBIGUOUS_MATCH) {
+                color = cv::Vec3b(0, 0, 255); // Red.
+            } else if (search_success == stereo::inverse_depth_filter::FAIL_MAX_COST) {
+                color = cv::Vec3b(0, 255, 255); // Yellow.
+            } else if (search_success != stereo::inverse_depth_filter::SUCCESS) {
+                fprintf(stderr, "inverse_depth_filter::search: Unrecognized status!\n");
+                FLAME_ASSERT(false);
+                return false;
+            }
+
+//      cv::Point2i u_cmpi(u_cmp.x + 0.5f, u_cmp.y + 0.5f);
+//      cv::rectangle(*debug_img, u_cmpi - debug_feature_offset,
+//                    u_cmpi + debug_feature_offset,
+//                    cv::Scalar(color[0], color[1], color[2]), -1);
+//
+//      auto colormap = [&color](float a) { return color; };
+//      utils::applyColorMapLine(u_start, u_end, 1, 1, colormap, 0.5, debug_img);
+            return false;
+        }
+
+        *flow = u_cmp - offset;
+
+
+
+        return true;
+    }
 
 void Flame::projectFeatures(const Params& params,
                             const Matrix3f& K,

@@ -671,6 +671,9 @@ int main(int argc, char *argv[]) {
         eigen_pose1.translation() = t1;
         okvis::kinematics::Transformation pose1(eigen_pose1.matrix());
 
+        okvis::kinematics::Transformation T_C0C1 = pose0.inverse()*pose1;
+        std::cout<< "T_C)C1: \n" << T_C0C1.T3x4() << std::endl;
+
 
       okvis::Time ts(time);
       node.processFrame(img_id, ts, pose0,

@@ -337,15 +337,32 @@ class Flame final {
                                    utils::StatsTracker* stats,
                                    Image3b* debug_img);
 
-  // Track a single feature in the new image.
-  static bool trackFeature(const Params& params,
-                           const FrameIDToFrame& pfs,
-                           const stereo::EpipolarGeometry<float>& epigeo,
-                           const utils::Frame& fnew,
-                           const utils::Frame& curr_pf,
-                           FeatureWithIDepth* feat,
-                           Point2f* flow, float* residual,
-                           Image3b* debug_img);
+
+    // Track a single feature in the new image.
+    static bool trackFeature(const Params& params,
+                             const Matrix3f& K,
+                             const Matrix3f& Kinv,
+                             const FrameIDToFrame& pfs,
+                             const stereo::EpipolarGeometry<float>& epigeo,
+                             const utils::Frame& fnew,
+                             const utils::Frame& curr_pf,
+                             FeatureWithIDepth* feat,
+                             Point2f* flow, float* residual,
+                             Image3b* debug_img);
+
+    static bool trackFeatureRight(const Params& params,
+                                  const Matrix3f& K0,
+                                  const Matrix3f& K0inv,
+                                  const Matrix3f& K1,
+                                  const Matrix3f& K1inv,
+                                  const FrameIDToFrame& pfs,
+                                  const stereo::EpipolarGeometry<float>& epigeo,
+                                  const utils::Frame& fnew,
+                                  const utils::Frame& curr_pf,
+                                  FeatureWithIDepth* feat,
+                                  cv::Point2f* flow,
+                                  float* residual,
+                                  Image3b* debug_img);
 
   // Project features into current frame.
   static void projectFeatures(const Params& params,
